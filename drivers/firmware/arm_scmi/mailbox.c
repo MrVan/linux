@@ -53,7 +53,7 @@ static bool mailbox_chan_available(struct device *dev, int idx)
 }
 
 static int mailbox_chan_setup(struct scmi_chan_info *cinfo, struct device *dev,
-			      bool tx)
+			      int prot_id, bool tx)
 {
 	const char *desc = tx ? "Tx" : "Rx";
 	struct device *cdev = cinfo->dev;

@@ -595,7 +595,7 @@ static int scmi_chan_setup(struct scmi_info *info, struct device *dev,
 
 	cinfo->dev = dev;
 
-	ret = info->desc->ops->chan_setup(cinfo, info->dev, tx);
+	ret = info->desc->ops->chan_setup(cinfo, info->dev, prot_id, tx);
 	if (ret)
 		return ret;
 
@@ -687,8 +687,11 @@ static int scmi_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct device_node *child, *np = dev->of_node;
 
-	desc = of_device_get_match_data(dev);
-	if (!desc)
+	if (of_get_property(np, "mboxes", NULL))
+		desc = &scmi_mailbox_desc;
+	else if (of_get_property(np, "smc-id", NULL))
+		desc = &scmi_smc_desc;
+	else
 		return -EINVAL;
 
 	info = devm_kzalloc(dev, sizeof(*info), GFP_KERNEL);
@@ -826,7 +829,7 @@ ATTRIBUTE_GROUPS(versions);
 
 /* Each compatible listed below must have descriptor associated with it */
 static const struct of_device_id scmi_of_match[] = {
-	{ .compatible = "arm,scmi", .data = &scmi_mailbox_desc },
+	{ .compatible = "arm,scmi",  },
 	{ /* Sentinel */ },
 };
 

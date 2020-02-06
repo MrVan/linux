@@ -182,7 +182,8 @@ struct scmi_chan_info {
  */
 struct scmi_transport_ops {
 	bool (*chan_available)(struct device *dev, int idx);
-	int (*chan_setup)(struct scmi_chan_info *cinfo, struct device *dev, bool tx);
+	int (*chan_setup)(struct scmi_chan_info *cinfo, struct device *dev,
+			  int prot_id, bool tx);
 	int (*chan_free)(int id, void *p, void *data);
 	int (*send_message)(struct scmi_chan_info *cinfo, struct scmi_xfer *xfer);
 	void (*mark_txdone)(struct scmi_chan_info *cinfo, int ret);
@@ -207,6 +208,7 @@ struct scmi_desc {
 };
 
 extern const struct scmi_desc scmi_mailbox_desc;
+extern const struct scmi_desc scmi_smc_desc;
 
 void scmi_rx_callback(struct scmi_chan_info *cinfo, u32 msg_hdr);
 void scmi_free_channel(struct scmi_chan_info *cinfo, struct idr *idr, int id);
