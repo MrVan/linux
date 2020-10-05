@@ -28,6 +28,7 @@
 #include <drm/drm_bridge.h>
 #include <drm/drm_fb_helper.h>
 #include <drm/drm_mipi_dsi.h>
+#include <drm/drm_of.h>
 #include <drm/drm_panel.h>
 #include <drm/drm_print.h>
 #include <drm/drm_probe_helper.h>
@@ -1397,7 +1398,14 @@ static int samsung_dsim_bridge_attach(struct drm_bridge *bridge,
 {
 	struct samsung_dsim *dsi = bridge->driver_private;
 	struct drm_encoder *encoder = bridge->encoder;
+	struct device *dev = dsi->dev;
+	struct device_node *np = dev->of_node;
 	int ret;
+
+	ret = drm_of_find_panel_or_bridge(np, 1, 0,
+					  &dsi->panel, &dsi->out_bridge);
+	if (ret)
+		return ret;
 
 	if (!dsi->out_bridge && !dsi->panel)
 		return -EPROBE_DEFER;
@@ -1407,7 +1415,6 @@ static int samsung_dsim_bridge_attach(struct drm_bridge *bridge,
 					bridge, flags);
 		if (ret)
 			return ret;
-		list_splice_init(&encoder->bridge_chain, &dsi->bridge_chain);
 	} else {
 		ret = samsung_dsim_create_connector(dsi);
 		if (ret)
@@ -1465,18 +1472,31 @@ static void samsung_dsim_bridge_mode_set(struct drm_bridge *bridge,
 	drm_mode_copy(&dsi->mode, adjusted_mode);
 }
 
+static bool samsung_dsim_bridge_mode_fixup(struct drm_bridge *bridge,
+					   const struct drm_display_mode *mode,
+					   struct drm_display_mode *adjusted_mode)
+{
+	/* At least LCDIF + DSIM needs active low sync */
+	adjusted_mode->flags |= (DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC);
+	adjusted_mode->flags &= ~(DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC);
+
+	return true;
+}
+
 static const struct drm_bridge_funcs samsung_dsim_bridge_funcs = {
 	.attach = samsung_dsim_bridge_attach,
 	.detach = samsung_dsim_bridge_detach,
 	.enable = samsung_dsim_bridge_enable,
 	.disable = samsung_dsim_bridge_disable,
 	.mode_set = samsung_dsim_bridge_mode_set,
+	.mode_fixup = samsung_dsim_bridge_mode_fixup,
 };
 
 static int samsung_dsim_host_attach(struct mipi_dsi_host *host,
 				    struct mipi_dsi_device *device)
 {
 	struct samsung_dsim *dsi = host_to_dsi(host);
+#if 0
 	const struct samsung_dsim_host_ops *ops = dsi->driver_data->host_ops;
 	struct drm_bridge *out_bridge;
 
@@ -1502,13 +1522,16 @@ static int samsung_dsim_host_attach(struct mipi_dsi_host *host,
 		if (ret)
 			return ret;
 	}
+#endif
 
 	dsi->lanes = device->lanes;
 	dsi->format = device->format;
 	dsi->mode_flags = device->mode_flags;
 
+#if 0
 	if (ops && ops->attach)
 		ops->attach(dsi->dsi_host.dev, device);
+#endif
 
 	return 0;
 }
