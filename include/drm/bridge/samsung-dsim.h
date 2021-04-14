@@ -54,7 +54,14 @@ struct samsung_dsim_driver_data {
 	unsigned int has_freqband:1;
 	unsigned int has_clklane_stop:1;
 	unsigned int num_clks;
-	unsigned int max_freq;
+	unsigned long fin_pll_min_freq;
+	unsigned long fin_pll_max_freq;
+	unsigned long fin_pll_min_div;
+	unsigned long fin_pll_max_div;
+	unsigned long fvco_out_min_freq;
+	unsigned long fvco_out_max_freq;
+	unsigned long fvco_out_min_div;
+	unsigned long fvco_out_max_div;
 	unsigned int wait_for_reset;
 	unsigned int num_bits_resol;
 	const unsigned int *reg_values;

@@ -404,24 +404,32 @@ static unsigned long samsung_dsim_pll_find_pms(struct samsung_dsim *dsi,
 	u16 _m, best_m;
 	u8 _s, best_s;
 
-	p_min = DIV_ROUND_UP(fin, (12 * MHZ));
-	p_max = fin / (6 * MHZ);
+	/* Clamp Fin to Fin_pll(2-30MHz) and P(1-63) constraints (Table 13-40)
+	 * and P(1-33) constraints in 13.7.10.1 Master PLL PMS Value setting
+	 * Register (MIPI_DPHY_M_PLLPMS) */
+	p_min = clamp(DIV_ROUND_UP(fin, (driver_data->fin_pll_max_freq * MHZ)),
+		      driver_data->fin_pll_min_div,
+		      driver_data->fin_pll_max_div);
+	p_max = clamp(fin / (driver_data->fin_pll_min_freq * MHZ),
+		      driver_data->fin_pll_min_div,
+		      driver_data->fin_pll_max_div);
 
 	for (_p = p_min; _p <= p_max; ++_p) {
-		for (_s = 0; _s <= 5; ++_s) {
+		for (_s = 0; _s <= 5; ++_s) {	/* Output divider S, OK */
 			u64 tmp;
 			u32 delta;
 
 			tmp = (u64)fout * (_p << _s);
 			do_div(tmp, fin);
 			_m = tmp;
-			if (_m < 41 || _m > 125)
+			if (_m < driver_data->fvco_out_min_div ||
+			    _m > driver_data->fvco_out_max_div)
 				continue;
 
 			tmp = (u64)_m * fin;
 			do_div(tmp, _p);
-			if (tmp < 500 * MHZ ||
-					tmp > driver_data->max_freq * MHZ)
+			if (tmp < driver_data->fvco_out_min_freq * MHZ ||
+			    tmp > driver_data->fvco_out_max_freq * MHZ)
 				continue;
 
 			tmp = (u64)_m * fin;
