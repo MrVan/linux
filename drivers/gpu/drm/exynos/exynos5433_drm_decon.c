@@ -513,13 +513,8 @@ static void decon_swreset(struct decon_context *ctx)
 static void decon_atomic_enable(struct exynos_drm_crtc *crtc)
 {
 	struct decon_context *ctx = crtc->ctx;
-	int ret;
 
-	ret = pm_runtime_resume_and_get(ctx->dev);
-	if (ret < 0) {
-		DRM_DEV_ERROR(ctx->dev, "failed to enable DECON device.\n");
-		return;
-	}
+	pm_runtime_get_sync(ctx->dev);
 
 	exynos_drm_pipe_clk_enable(crtc, true);
 
