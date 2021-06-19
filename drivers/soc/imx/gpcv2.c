@@ -292,9 +292,6 @@ static int imx_pgc_power_up(struct generic_pm_domain *genpd)
 		 */
 	}
 
-	/* Disable reset clocks for all devices in the domain */
-	clk_bulk_disable_unprepare(domain->num_clks, domain->clks);
-
 	return 0;
 
 out_clk_disable:
@@ -314,13 +311,6 @@ static int imx_pgc_power_down(struct generic_pm_domain *genpd)
 	u32 reg_val;
 	int ret;
 
-	/* Enable reset clocks for all devices in the domain */
-	ret = clk_bulk_prepare_enable(domain->num_clks, domain->clks);
-	if (ret) {
-		dev_err(domain->dev, "failed to enable reset clocks\n");
-		return ret;
-	}
-
 	/* request the ADB400 to power down */
 	if (domain->bits.hskreq) {
 		regmap_clear_bits(domain->regmap, GPC_PU_PWRHSK,
@@ -332,7 +322,7 @@ static int imx_pgc_power_down(struct generic_pm_domain *genpd)
 					       0, USEC_PER_MSEC);
 		if (ret) {
 			dev_err(domain->dev, "failed to power down ADB400\n");
-			goto out_clk_disable;
+			return ret;
 		}
 	}
 
@@ -354,7 +344,7 @@ static int imx_pgc_power_down(struct generic_pm_domain *genpd)
 					       0, USEC_PER_MSEC);
 		if (ret) {
 			dev_err(domain->dev, "failed to command PGC\n");
-			goto out_clk_disable;
+			return ret;
 		}
 	}
 
@@ -372,11 +362,6 @@ static int imx_pgc_power_down(struct generic_pm_domain *genpd)
 	pm_runtime_put(domain->dev);
 
 	return 0;
-
-out_clk_disable:
-	clk_bulk_disable_unprepare(domain->num_clks, domain->clks);
-
-	return ret;
 }
 
 static const struct imx_pgc_domain imx7_pgc_domains[] = {
