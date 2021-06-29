@@ -85,10 +85,6 @@ static int imx_blk_ctl_power_on(struct generic_pm_domain *domain)
 
 	ret = regmap_update_bits(regmap, hw->offset, hw->mask, hw->mask);
 
-	mutex_unlock(&blk_ctl->lock);
-
-	return 0;
-
 disable_clk:
 	clk_bulk_disable_unprepare(blk_ctl->num_clks, blk_ctl->clks);
 
@@ -103,9 +99,15 @@ static int imx_blk_ctl_power_off(struct generic_pm_domain *domain)
 	struct imx_blk_ctl *blk_ctl = pd->blk_ctl;
 	struct regmap *regmap = blk_ctl->regmap;
 	const struct imx_blk_ctl_hw *hw = &blk_ctl->dev_data->pds[pd->id];
-	int ret;
+	int ret = 0;
 
 	mutex_lock(&blk_ctl->lock);
+
+	ret = clk_bulk_prepare_enable(blk_ctl->num_clks, blk_ctl->clks);
+	if (ret) {
+		mutex_unlock(&blk_ctl->lock);
+		return ret;
+	}
 
 	if (!(hw->flags & IMX_BLK_CTL_PD_HANDSHAKE)) {
 		ret = regmap_clear_bits(regmap, hw->offset, hw->mask);
@@ -117,21 +119,15 @@ static int imx_blk_ctl_power_off(struct generic_pm_domain *domain)
 			if (ret)
 				goto disable_clk;
 		}
-	}
-
-	if (hw->flags & IMX_BLK_CTL_PD_HANDSHAKE) {
+	} else {
 		ret = imx_blk_ctl_enable_hsk(blk_ctl->dev);
 		if (ret)
 			dev_err(blk_ctl->dev, "Hankshake failed when power off\n");
 	}
 
+disable_clk:
 	clk_bulk_disable_unprepare(blk_ctl->num_clks, blk_ctl->clks);
 
-	mutex_unlock(&blk_ctl->lock);
-
-	return 0;
-
-disable_clk:
 	mutex_unlock(&blk_ctl->lock);
 
 	return ret;
