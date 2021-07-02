@@ -55,6 +55,13 @@ static int imx_blk_ctl_power_on(struct generic_pm_domain *domain)
 
 	mutex_lock(&blk_ctl->lock);
 
+	ret = pm_runtime_get_sync(pd->dev);
+	if (ret < 0) {
+		pm_runtime_put_noidle(pd->dev);
+		mutex_unlock(&blk_ctl->lock);
+		return ret;
+	}
+
 	ret = clk_bulk_prepare_enable(blk_ctl->num_clks, blk_ctl->clks);
 	if (ret) {
 		mutex_unlock(&blk_ctl->lock);
@@ -87,6 +94,9 @@ static int imx_blk_ctl_power_on(struct generic_pm_domain *domain)
 
 disable_clk:
 	clk_bulk_disable_unprepare(blk_ctl->num_clks, blk_ctl->clks);
+
+	if (ret)
+		pm_runtime_put(pd->dev);
 
 	mutex_unlock(&blk_ctl->lock);
 
@@ -128,6 +138,8 @@ static int imx_blk_ctl_power_off(struct generic_pm_domain *domain)
 disable_clk:
 	clk_bulk_disable_unprepare(blk_ctl->num_clks, blk_ctl->clks);
 
+	pm_runtime_put(pd->dev);
+
 	mutex_unlock(&blk_ctl->lock);
 
 	return ret;
@@ -159,6 +171,11 @@ static int imx_blk_ctl_probe(struct platform_device *pdev)
 			return -EPROBE_DEFER;
 		}
 	}
+
+	domain->dev = &pdev->dev;
+
+	pm_runtime_set_active(domain->dev);
+	pm_runtime_enable(domain->dev);
 
 	if (domain->hw->active_pd_name)
 		parent_genpd = pd_to_genpd(active_pd->pm_domain);
@@ -286,7 +303,6 @@ int imx_blk_ctl_register(struct device *dev)
 		domain->genpd.name = dev_data->pds[i].name;
 		domain->genpd.power_off = imx_blk_ctl_power_off;
 		domain->genpd.power_on = imx_blk_ctl_power_on;
-		domain->dev = &pd_pdev->dev;
 		domain->hooked = false;
 
 		ret = pm_genpd_init(&domain->genpd, NULL, true);
