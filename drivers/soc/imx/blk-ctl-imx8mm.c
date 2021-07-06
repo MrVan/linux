@@ -56,8 +56,6 @@ static struct imx_blk_ctl_hw imx8mm_vpumix_blk_ctl_pds[] = {
 	IMX_BLK_CTL_PD("VPU_BLK_CTL_G1", "vpu-g1", IMX8MM_BLK_CTL_PD_VPU_G1, 0x4,
 		       BIT(1), 0, BIT(1), IMX_BLK_CTL_PD_RESET),
 	IMX_BLK_CTL_PD("VPU_BLK_CTL_H1", "vpu-h1", IMX8MM_BLK_CTL_PD_VPU_H1, 0x4,
-		       BIT(2), 0, BIT(2), IMX_BLK_CTL_PD_RESET),
-	IMX_BLK_CTL_PD("VPU_BLK_CTL_BUS", "vpumix", IMX8MM_BLK_CTL_PD_VPU_BUS, 0x4,
 		       BIT(2), 0, BIT(2), IMX_BLK_CTL_PD_HANDSHAKE | IMX_BLK_CTL_PD_RESET)
 };
 
