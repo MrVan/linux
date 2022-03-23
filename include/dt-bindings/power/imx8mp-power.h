@@ -43,4 +43,8 @@
 #define IMX8MP_MEDIABLK_PD_DWE				8
 #define IMX8MP_MEDIABLK_PD_MIPI_DSI_2			9
 
+#define IMX8MP_VPUBLK_PD_G1				0
+#define IMX8MP_VPUBLK_PD_G2				1
+#define IMX8MP_VPUBLK_PD_H1				2
+
 #endif
