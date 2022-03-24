@@ -26,16 +26,22 @@ properties:
     oneOf:
       - items:
           - enum:
+              - fsl,imx8mp-nic
               - fsl,imx8mn-nic
               - fsl,imx8mm-nic
               - fsl,imx8mq-nic
           - const: fsl,imx8m-nic
       - items:
           - enum:
+              - fsl,imx8mp-noc
               - fsl,imx8mn-noc
               - fsl,imx8mm-noc
               - fsl,imx8mq-noc
           - const: fsl,imx8m-noc
+      - items:
+          - const: fsl,imx8mp-noc
+          - const: fsl,imx8m-noc
+          - const: syscon
       - const: fsl,imx8m-nic
 
   reg:
