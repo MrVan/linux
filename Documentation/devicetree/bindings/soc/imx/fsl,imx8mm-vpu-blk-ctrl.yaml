@@ -16,9 +16,14 @@ description:
 
 properties:
   compatible:
-    items:
-      - const: fsl,imx8mm-vpu-blk-ctrl
-      - const: syscon
+    oneOf:
+      items:
+        - const: fsl,imx8mm-vpu-blk-ctrl
+        - const: syscon
+      items:
+        - const: fsl,imx8mp-vpu-blk-ctrl
+        - const: fsl,imx8mm-vpu-blk-ctrl
+        - const: syscon
 
   reg:
     maxItems: 1
