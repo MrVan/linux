@@ -490,6 +490,19 @@ struct rproc_dump_segment {
 };
 
 /**
+ * enum rproc_features - features supported
+ *
+ * @RPROC_FEAT_ATTACH_ON_RECOVERY: remote processor no need help from Linux
+ *                                 to recover, such as firmware loading.
+ *                                 Linux just need to attach after recovery.
+ */
+
+enum rproc_features {
+	RPROC_FEAT_ATTACH_ON_RECOVERY,
+	RPROC_MAX_FEATURES,
+};
+
+/**
  * struct rproc - represents a physical remote processor device
  * @node: list node of this rproc object
  * @domain: iommu domain
@@ -530,6 +543,7 @@ struct rproc_dump_segment {
  * @elf_machine: firmware ELF machine
  * @cdev: character device of the rproc
  * @cdev_put_on_release: flag to indicate if remoteproc should be shutdown on @char_dev release
+ * @features: indicate remoteproc features
  */
 struct rproc {
 	struct list_head node;
@@ -570,6 +584,7 @@ struct rproc {
 	u16 elf_machine;
 	struct cdev cdev;
 	bool cdev_put_on_release;
+	DECLARE_BITMAP(features, RPROC_MAX_FEATURES);
 };
 
 /**

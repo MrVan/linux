@@ -24,6 +24,21 @@ struct rproc_debug_trace {
 	struct rproc_mem_entry trace_mem;
 };
 
+static inline bool rproc_has_feature(struct rproc *rproc, unsigned int feature)
+{
+	return test_bit(feature, rproc->features);
+}
+
+static inline int rproc_set_feature(struct rproc *rproc, unsigned int feature)
+{
+	if (feature >= RPROC_MAX_FEATURES)
+		return -EINVAL;
+
+	set_bit(feature, rproc->features);
+
+	return 0;
+}
+
 /* from remoteproc_core.c */
 void rproc_release(struct kref *kref);
 irqreturn_t rproc_vq_interrupt(struct rproc *rproc, int vq_id);
