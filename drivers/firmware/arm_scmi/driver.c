@@ -437,12 +437,12 @@ EXPORT_SYMBOL_GPL(scmi_protocol_unregister);
  */
 static void scmi_create_protocol_devices(struct device_node *np,
 					 struct scmi_info *info,
-					 int prot_id, const char *name)
+					 int prot_id, const char *name, u32 flags)
 {
 	struct scmi_device *sdev;
 
 	mutex_lock(&info->devreq_mtx);
-	sdev = scmi_device_create(np, info->dev, prot_id, name);
+	sdev = scmi_device_create(np, info->dev, prot_id, name, flags);
 	if (name && !sdev)
 		dev_err(info->dev,
 			"failed to create device for protocol 0x%X (%s)\n",
@@ -2680,7 +2680,7 @@ static int scmi_chan_setup(struct scmi_info *info, struct device_node *of_node,
 	snprintf(name, 32, "__scmi_transport_device_%s_%02X",
 		 idx ? "rx" : "tx", prot_id);
 	/* Create a uniquely named, dedicated transport device for this chan */
-	tdev = scmi_device_create(of_node, info->dev, prot_id, name);
+	tdev = scmi_device_create(of_node, info->dev, prot_id, name, 0);
 	if (!tdev) {
 		dev_err(info->dev,
 			"failed to create transport device (%s)\n", name);
@@ -2878,7 +2878,7 @@ static int scmi_device_request_notifier(struct notifier_block *nb,
 	switch (action) {
 	case SCMI_BUS_NOTIFY_DEVICE_REQUEST:
 		scmi_create_protocol_devices(np, info, id_table->protocol_id,
-					     id_table->name);
+					     id_table->name, id_table->flags);
 		break;
 	case SCMI_BUS_NOTIFY_DEVICE_UNREQUEST:
 		scmi_destroy_protocol_devices(info, id_table->protocol_id,
@@ -3257,7 +3257,7 @@ static int scmi_probe(struct platform_device *pdev)
 		}
 
 		of_node_get(child);
-		scmi_create_protocol_devices(child, info, prot_id, NULL);
+		scmi_create_protocol_devices(child, info, prot_id, NULL, 0);
 	}
 
 	return 0;

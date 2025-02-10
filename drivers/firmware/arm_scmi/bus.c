@@ -345,9 +345,24 @@ static void __scmi_device_destroy(struct scmi_device *scmi_dev)
 	device_unregister(&scmi_dev->dev);
 }
 
+
+static int
+__scmi_device_set_node(struct scmi_device *scmi_dev, struct device_node *np,
+		       int protocol, const char *name, u32 flags)
+{
+	if (flags & SCMI_DEVICE_NO_FWNODE) {
+		scmi_dev->dev.of_node = np;
+		return 0;
+	}
+
+	device_set_node(&scmi_dev->dev, of_fwnode_handle(np));
+
+	return 0;
+}
+
 static struct scmi_device *
 __scmi_device_create(struct device_node *np, struct device *parent,
-		     int protocol, const char *name)
+		     int protocol, const char *name, u32 flags)
 {
 	int id, retval;
 	struct scmi_device *scmi_dev;
@@ -397,7 +412,7 @@ __scmi_device_create(struct device_node *np, struct device *parent,
 	scmi_dev->id = id;
 	scmi_dev->protocol_id = protocol;
 	scmi_dev->dev.parent = parent;
-	device_set_node(&scmi_dev->dev, of_fwnode_handle(np));
+	__scmi_device_set_node(scmi_dev, np, protocol, name, flags);
 	scmi_dev->dev.bus = &scmi_bus_type;
 	scmi_dev->dev.release = scmi_device_release;
 	dev_set_name(&scmi_dev->dev, "scmi_dev.%d", id);
@@ -442,14 +457,14 @@ put_dev:
  */
 struct scmi_device *scmi_device_create(struct device_node *np,
 				       struct device *parent, int protocol,
-				       const char *name)
+				       const char *name, u32 flags)
 {
 	struct list_head *phead;
 	struct scmi_requested_dev *rdev;
 	struct scmi_device *scmi_dev = NULL;
 
 	if (name)
-		return __scmi_device_create(np, parent, protocol, name);
+		return __scmi_device_create(np, parent, protocol, name, flags);
 
 	mutex_lock(&scmi_requested_devices_mtx);
 	phead = idr_find(&scmi_requested_devices, protocol);
@@ -465,7 +480,8 @@ struct scmi_device *scmi_device_create(struct device_node *np,
 
 		sdev = __scmi_device_create(np, parent,
 					    rdev->id_table->protocol_id,
-					    rdev->id_table->name);
+					    rdev->id_table->name,
+					    rdev->id_table->flags);
 		/* Report errors and carry on... */
 		if (sdev)
 			scmi_dev = sdev;

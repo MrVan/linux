@@ -947,9 +947,13 @@ struct scmi_device {
 
 #define to_scmi_dev(d) container_of_const(d, struct scmi_device, dev)
 
+/* The scmi device does not have fwnode handle */
+#define SCMI_DEVICE_NO_FWNODE	BIT(0)
+
 struct scmi_device_id {
 	u8 protocol_id;
 	const char *name;
+	u32 flags;
 };
 
 struct scmi_driver {
