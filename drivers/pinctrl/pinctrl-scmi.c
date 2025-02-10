@@ -505,11 +505,6 @@ static int pinctrl_scmi_get_pins(struct scmi_pinctrl *pmx,
 	return 0;
 }
 
-static const char * const scmi_pinctrl_blocklist[] = {
-	"fsl,imx95",
-	NULL
-};
-
 static int scmi_pinctrl_probe(struct scmi_device *sdev)
 {
 	int ret;
@@ -520,9 +515,6 @@ static int scmi_pinctrl_probe(struct scmi_device *sdev)
 
 	if (!sdev->handle)
 		return -EINVAL;
-
-	if (of_machine_compatible_match(scmi_pinctrl_blocklist))
-		return -ENODEV;
 
 	handle = sdev->handle;
 
@@ -561,8 +553,13 @@ static int scmi_pinctrl_probe(struct scmi_device *sdev)
 	return pinctrl_enable(pmx->pctldev);
 }
 
+struct scmi_device_vendor_id blocked_ids[] =  {
+	{ "NXP", "IMX" },
+	NULL
+};
+
 static const struct scmi_device_id scmi_id_table[] = {
-	{ SCMI_PROTOCOL_PINCTRL, "pinctrl" },
+	{ SCMI_PROTOCOL_PINCTRL, "pinctrl", 0, blocked_ids },
 	{ }
 };
 MODULE_DEVICE_TABLE(scmi, scmi_id_table);

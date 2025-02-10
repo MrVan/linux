@@ -950,10 +950,18 @@ struct scmi_device {
 /* The scmi device does not have fwnode handle */
 #define SCMI_DEVICE_NO_FWNODE	BIT(0)
 
+struct scmi_device_vendor_id {
+	const char *vendor_id;
+	const char *sub_vendor_id;
+};
+
 struct scmi_device_id {
 	u8 protocol_id;
 	const char *name;
 	u32 flags;
+	/* Optional */
+	struct scmi_device_vendor_id *blocked_ids;
+	struct scmi_device_vendor_id *allowed_ids;
 };
 
 struct scmi_driver {

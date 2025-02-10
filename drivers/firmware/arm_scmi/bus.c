@@ -432,11 +432,27 @@ put_dev:
 	return NULL;
 }
 
+static bool __scmi_device_vendor_id_match(struct scmi_revision_info *revision,
+					  struct scmi_device_vendor_id *ids)
+{
+	while (ids) {
+		if (!strncmp(revision->vendor_id, ids->vendor_id,
+			    SCMI_SHORT_NAME_MAX_SIZE) &&
+		    !strncmp(revision->sub_vendor_id, ids->sub_vendor_id,
+			     SCMI_SHORT_NAME_MAX_SIZE))
+			return true;
+		ids++;
+	}
+
+	return false;
+}
+
 /**
  * scmi_device_create  - A method to create one or more SCMI devices
  *
  * @np: A reference to the device node to use for the new device(s)
  * @parent: The parent device to use identifying a specific SCMI instance
+ * @revision: The scmi revision info
  * @protocol: The SCMI protocol to be associated with this device
  * @name: The requested-name of the device to be created; this is optional
  *	  and if no @name is provided, all the devices currently known to
@@ -456,7 +472,9 @@ put_dev:
  *	   device was found to have been requested for that specific protocol.
  */
 struct scmi_device *scmi_device_create(struct device_node *np,
-				       struct device *parent, int protocol,
+				       struct device *parent,
+				       struct scmi_revision_info *revision,
+				       int protocol,
 				       const char *name, u32 flags)
 {
 	struct list_head *phead;
@@ -476,7 +494,15 @@ struct scmi_device *scmi_device_create(struct device_node *np,
 
 	/* Walk the list of requested devices for protocol and create them */
 	list_for_each_entry(rdev, phead, node) {
+		struct scmi_device_vendor_id *allowed_ids = rdev->id_table->allowed_ids;
+		struct scmi_device_vendor_id *blocked_ids = rdev->id_table->blocked_ids;
 		struct scmi_device *sdev;
+
+		if (blocked_ids && __scmi_device_vendor_id_match(revision, blocked_ids))
+			continue;
+
+		if (allowed_ids && !__scmi_device_vendor_id_match(revision, allowed_ids))
+			continue;
 
 		sdev = __scmi_device_create(np, parent,
 					    rdev->id_table->protocol_id,
