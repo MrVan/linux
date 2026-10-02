@@ -977,7 +977,7 @@ static void arm_smmu_page_response(struct device *dev, struct iopf_fault *unused
 	}
 
 	arm_smmu_cmdq_issue_cmd(master->smmu,
-				arm_smmu_make_cmd_resume(master->streams[0].id,
+				arm_smmu_make_cmd_resume(master->streams[0]->id,
 							 resp->grpid,
 							 resume_resp));
 	/*
@@ -1522,7 +1522,7 @@ static void arm_smmu_sync_cd(struct arm_smmu_master *master,
 	for (i = 0; i < master->num_streams; i++)
 		arm_smmu_cmdq_batch_add_cmd(
 			smmu, &cmds,
-			arm_smmu_make_cmd_cfgi_cd(master->streams[i].id, ssid,
+			arm_smmu_make_cmd_cfgi_cd(master->streams[i]->id, ssid,
 						  leaf));
 
 	arm_smmu_cmdq_batch_submit(smmu, &cmds);
@@ -2463,7 +2463,7 @@ static int arm_smmu_atc_inv_master(struct arm_smmu_master *master,
 	for (i = 0; i < master->num_streams; i++)
 		arm_smmu_cmdq_batch_add_cmd(
 			master->smmu, &cmds,
-			arm_smmu_make_cmd_atc_inv_all(master->streams[i].id,
+			arm_smmu_make_cmd_atc_inv_all(master->streams[i]->id,
 						      ssid));
 
 	return arm_smmu_cmdq_batch_submit(master->smmu, &cmds);
@@ -3155,13 +3155,13 @@ void arm_smmu_install_ste_for_dev(struct arm_smmu_master *master,
 		STRTAB_STE_1_EATS_TRANS;
 
 	for (i = 0; i < master->num_streams; ++i) {
-		u32 sid = master->streams[i].id;
+		u32 sid = master->streams[i]->id;
 		struct arm_smmu_ste *step =
 			arm_smmu_get_step_for_sid(smmu, sid);
 
 		/* Bridged PCI devices may end up with duplicated IDs */
 		for (j = 0; j < i; j++)
-			if (master->streams[j].id == sid)
+			if (master->streams[j]->id == sid)
 				break;
 		if (j < i)
 			continue;
@@ -3447,7 +3447,7 @@ arm_smmu_master_build_invs(struct arm_smmu_master *master, bool ats_enabled,
 		 */
 		if (!arm_smmu_master_build_inv(
 			    master, nesting ? INV_TYPE_ATS_FULL : INV_TYPE_ATS,
-			    master->streams[i].id, ssid))
+			    master->streams[i]->id, ssid))
 			return NULL;
 	}
 
@@ -4276,10 +4276,10 @@ static int arm_smmu_init_sid_strtab(struct arm_smmu_device *smmu, u32 sid)
 
 static int arm_smmu_stream_id_cmp(const void *_l, const void *_r)
 {
-	const typeof_member(struct arm_smmu_stream, id) *l = _l;
-	const typeof_member(struct arm_smmu_stream, id) *r = _r;
+	const struct arm_smmu_stream * const *l = _l;
+	const struct arm_smmu_stream * const *r = _r;
 
-	return cmp_int(*l, *r);
+	return cmp_int((*l)->id, (*r)->id);
 }
 
 static int arm_smmu_insert_master(struct arm_smmu_device *smmu,
@@ -4309,10 +4309,16 @@ static int arm_smmu_insert_master(struct arm_smmu_device *smmu,
 	}
 
 	for (i = 0; i < fwspec->num_ids; i++) {
-		struct arm_smmu_stream *new_stream = &master->streams[i];
+		struct arm_smmu_stream *new_stream;
 
+		new_stream = kzalloc_obj(*new_stream, GFP_KERNEL);
+		if (!new_stream) {
+			ret = -ENOMEM;
+			goto out_free_streams;
+		}
 		new_stream->id = fwspec->ids[i];
 		new_stream->master = master;
+		master->streams[i] = new_stream;
 	}
 
 	/* Put the ids into order for sorted to_merge/to_unref arrays */
@@ -4325,11 +4331,11 @@ static int arm_smmu_insert_master(struct arm_smmu_device *smmu,
 	 * which sort_nonatomic() invalidates by relocating the entries.
 	 */
 	for (i = 0; i < fwspec->num_ids; i++)
-		RB_CLEAR_NODE(&master->streams[i].node);
+		RB_CLEAR_NODE(&master->streams[i]->node);
 
 	mutex_lock(&smmu->streams_mutex);
 	for (i = 0; i < fwspec->num_ids; i++) {
-		struct arm_smmu_stream *new_stream = &master->streams[i];
+		struct arm_smmu_stream *new_stream = master->streams[i];
 		struct rb_node *existing;
 		u32 sid = new_stream->id;
 
@@ -4359,14 +4365,21 @@ static int arm_smmu_insert_master(struct arm_smmu_device *smmu,
 
 	if (ret) {
 		for (i--; i >= 0; i--)
-			if (!RB_EMPTY_NODE(&master->streams[i].node))
-				rb_erase(&master->streams[i].node,
+			if (!RB_EMPTY_NODE(&master->streams[i]->node))
+				rb_erase(&master->streams[i]->node,
 					 &smmu->streams);
-		kfree(master->streams);
-		kfree(master->build_invs);
+		mutex_unlock(&smmu->streams_mutex);
+		goto out_free_streams;
 	}
 	mutex_unlock(&smmu->streams_mutex);
 
+	return 0;
+
+out_free_streams:
+	for (i = 0; i < master->num_streams; i++)
+		kfree(master->streams[i]);
+	kfree(master->streams);
+	kfree(master->build_invs);
 	return ret;
 }
 
@@ -4381,9 +4394,12 @@ static void arm_smmu_remove_master(struct arm_smmu_master *master)
 
 	mutex_lock(&smmu->streams_mutex);
 	for (i = 0; i < fwspec->num_ids; i++)
-		if (!RB_EMPTY_NODE(&master->streams[i].node))
-			rb_erase(&master->streams[i].node, &smmu->streams);
+		if (!RB_EMPTY_NODE(&master->streams[i]->node))
+			rb_erase(&master->streams[i]->node, &smmu->streams);
 	mutex_unlock(&smmu->streams_mutex);
+
+	for (i = 0; i < master->num_streams; i++)
+		kfree(master->streams[i]);
 
 	kfree(master->streams);
 	kfree(master->build_invs);
