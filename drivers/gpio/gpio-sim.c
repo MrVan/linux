@@ -479,7 +479,6 @@ static int gpio_sim_add_bank(struct fwnode_handle *swnode, struct device *dev)
 	gc->base = -1;
 	gc->ngpio = num_lines;
 	gc->label = label;
-	gc->owner = THIS_MODULE;
 	gc->parent = dev;
 	gc->fwnode = swnode;
 	gc->get = gpio_sim_get;

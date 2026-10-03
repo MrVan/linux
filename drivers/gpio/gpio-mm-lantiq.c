@@ -114,7 +114,6 @@ static int ltq_mm_probe(struct platform_device *pdev)
 	gc->direction_output = ltq_mm_dir_out;
 	gc->set = ltq_mm_set;
 	gc->parent = dev;
-	gc->owner = THIS_MODULE;
 	gc->label = devm_kasprintf(dev, GFP_KERNEL, "%pOF", np);
 	if (!gc->label)
 		return -ENOMEM;

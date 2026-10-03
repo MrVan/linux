@@ -78,7 +78,6 @@ static int mlxbf_gpio_probe(struct platform_device *pdev)
 	if (ret)
 		return -ENODEV;
 
-	gc->owner = THIS_MODULE;
 	gc->ngpio = MLXBF_GPIO_NR;
 
 	ret = devm_gpiochip_add_data(dev, &gs->chip.gc, gs);

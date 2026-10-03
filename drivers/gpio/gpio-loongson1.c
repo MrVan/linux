@@ -71,7 +71,6 @@ static int ls1x_gpio_probe(struct platform_device *pdev)
 	if (ret)
 		goto err;
 
-	ls1x_gc->chip.gc.owner = THIS_MODULE;
 	ls1x_gc->chip.gc.request = ls1x_gpio_request;
 	ls1x_gc->chip.gc.free = ls1x_gpio_free;
 	/*

@@ -391,7 +391,6 @@ mlxbf2_gpio_probe(struct platform_device *pdev)
 	gc->direction_input = mlxbf2_gpio_direction_input;
 	gc->direction_output = mlxbf2_gpio_direction_output;
 	gc->ngpio = npins;
-	gc->owner = THIS_MODULE;
 
 	irq = platform_get_irq_optional(pdev, 0);
 	if (irq < 0 && irq != -ENXIO)

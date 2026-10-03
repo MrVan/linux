@@ -595,7 +595,6 @@ static int max732x_setup_gpio(struct max732x_chip *chip,
 	gc->ngpio = port;
 	gc->label = chip->client->name;
 	gc->parent = &chip->client->dev;
-	gc->owner = THIS_MODULE;
 
 	return port;
 }

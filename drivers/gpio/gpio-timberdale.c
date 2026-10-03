@@ -247,7 +247,6 @@ static int timbgpio_probe(struct platform_device *pdev)
 		return PTR_ERR(tgpio->membase);
 
 	gc->label = dev_name(&pdev->dev);
-	gc->owner = THIS_MODULE;
 	gc->parent = &pdev->dev;
 	gc->direction_input = timbgpio_gpio_direction_input;
 	gc->get = timbgpio_gpio_get;

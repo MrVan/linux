@@ -431,7 +431,6 @@ static int realtek_gpio_probe(struct platform_device *pdev)
 	}
 
 	ctrl->chip.gc.ngpio = ngpios;
-	ctrl->chip.gc.owner = THIS_MODULE;
 
 	irq = platform_get_irq_optional(pdev, 0);
 	if (irq < 0 && irq != -ENXIO)

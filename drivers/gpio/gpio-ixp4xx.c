@@ -311,7 +311,6 @@ static int ixp4xx_gpio_probe(struct platform_device *pdev)
 	}
 	g->chip.gc.ngpio = 16;
 	g->chip.gc.label = "IXP4XX_GPIO_CHIP";
-	g->chip.gc.owner = THIS_MODULE;
 
 	girq = &g->chip.gc.irq;
 	gpio_irq_chip_set_chip(girq, &ixp4xx_gpio_irqchip);

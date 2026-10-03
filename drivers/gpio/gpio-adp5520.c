@@ -128,7 +128,6 @@ static int adp5520_gpio_probe(struct platform_device *pdev)
 	gc->base = pdata->gpio_start;
 	gc->ngpio = gpios;
 	gc->label = pdev->name;
-	gc->owner = THIS_MODULE;
 
 	ret = adp5520_clr_bits(dev->master, ADP5520_GPIO_CFG_1,
 		pdata->gpio_en_mask);

@@ -240,7 +240,6 @@ static int sifive_gpio_probe(struct platform_device *pdev)
 	chip->irq_state = 0;
 
 	chip->gen_gc.gc.ngpio = ngpio;
-	chip->gen_gc.gc.owner = THIS_MODULE;
 	girq = &chip->gen_gc.gc.irq;
 	gpio_irq_chip_set_chip(girq, &sifive_gpio_irqchip);
 	girq->fwnode = dev_fwnode(dev);

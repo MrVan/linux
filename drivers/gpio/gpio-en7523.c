@@ -108,7 +108,6 @@ static int airoha_gpio_probe(struct platform_device *pdev)
 		return dev_err_probe(dev, err, "unable to init generic GPIO");
 
 	ctrl->gen_gc.gc.ngpio = AIROHA_GPIO_MAX;
-	ctrl->gen_gc.gc.owner = THIS_MODULE;
 	ctrl->gen_gc.gc.direction_output = airoha_dir_out;
 	ctrl->gen_gc.gc.direction_input = airoha_dir_in;
 	ctrl->gen_gc.gc.get_direction = airoha_get_dir;

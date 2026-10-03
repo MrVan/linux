@@ -195,7 +195,6 @@ static int ltc4283_gpio_probe(struct auxiliary_device *adev,
 	gc->base = -1;
 	gc->ngpio = LTC4283_PINS_MAX;
 	gc->label = adev->name;
-	gc->owner = THIS_MODULE;
 
 	return devm_gpiochip_add_data(dev, &st->gpio_chip, st);
 }

@@ -427,7 +427,6 @@ static int adp5585_gpio_probe(struct platform_device *pdev)
 	gc->base = -1;
 	gc->ngpio = adp5585->n_pins;
 	gc->label = pdev->name;
-	gc->owner = THIS_MODULE;
 
 	if (device_property_present(dev->parent, "interrupt-controller")) {
 		if (!adp5585->irq)

@@ -227,7 +227,6 @@ static int mlxbf3_gpio_probe(struct platform_device *pdev)
 
 	gc->request = gpiochip_generic_request;
 	gc->free = gpiochip_generic_free;
-	gc->owner = THIS_MODULE;
 	gc->add_pin_ranges = mlxbf3_gpio_add_pin_ranges;
 
 	irq = platform_get_irq_optional(pdev, 0);

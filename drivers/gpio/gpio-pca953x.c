@@ -810,7 +810,6 @@ static void pca953x_setup_gpio(struct pca953x_chip *chip, int gpios)
 	gc->ngpio = gpios;
 	gc->label = dev_name(&chip->client->dev);
 	gc->parent = &chip->client->dev;
-	gc->owner = THIS_MODULE;
 }
 
 #ifdef CONFIG_GPIO_PCA953X_IRQ

@@ -235,7 +235,6 @@ static int gpio_siox_probe(struct siox_device *sdevice)
 	gc->base = -1;
 	gc->can_sleep = 1;
 	gc->parent = dev;
-	gc->owner = THIS_MODULE;
 	gc->get = gpio_siox_get;
 	gc->set = gpio_siox_set;
 	gc->direction_input = gpio_siox_direction_input;

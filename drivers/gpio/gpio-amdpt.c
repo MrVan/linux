@@ -103,7 +103,6 @@ static int pt_gpio_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	pt_gpio->chip.gc.owner = THIS_MODULE;
 	pt_gpio->chip.gc.request = pt_gpio_request;
 	pt_gpio->chip.gc.free = pt_gpio_free;
 	pt_gpio->chip.gc.ngpio = (uintptr_t)device_get_match_data(dev);

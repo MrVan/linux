@@ -275,7 +275,6 @@ static int gpio_shared_proxy_probe(struct auxiliary_device *adev,
 	gc->ngpio = 1;
 	gc->label = dev_name(dev);
 	gc->parent = dev;
-	gc->owner = THIS_MODULE;
 	/*
 	 * Under the descriptor mutex the proxy may call
 	 * gpiod_set_config()/gpiod_direction_*(), which can reach pinctrl

@@ -294,7 +294,6 @@ static int cs5535_gpio_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	gc = &priv->chip;
-	gc->owner = THIS_MODULE;
 	gc->label = DRV_NAME;
 	gc->ngpio = 32;
 	gc->names = cs5535_gpio_names;

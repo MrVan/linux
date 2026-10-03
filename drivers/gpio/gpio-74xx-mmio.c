@@ -134,7 +134,6 @@ static int mmio_74xx_gpio_probe(struct platform_device *pdev)
 	priv->gen_gc.gc.direction_output = mmio_74xx_dir_out;
 	priv->gen_gc.gc.get_direction = mmio_74xx_get_direction;
 	priv->gen_gc.gc.ngpio = MMIO_74XX_BIT_CNT(priv->flags);
-	priv->gen_gc.gc.owner = THIS_MODULE;
 
 	return devm_gpiochip_add_data(&pdev->dev, &priv->gen_gc.gc, priv);
 }

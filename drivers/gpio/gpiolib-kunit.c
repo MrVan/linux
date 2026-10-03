@@ -103,7 +103,6 @@ static int gpio_test_provider_probe(struct platform_device *pdev)
 	gc->ngpio = GPIO_TEST_PROVIDER_NGPIO;
 	gc->label = GPIO_CONSUMER_NAME;
 	gc->parent = dev;
-	gc->owner = THIS_MODULE;
 
 	gc->get_direction = gpio_test_provider_get_direction;
 	gc->direction_input = gpio_test_provider_direction_input;

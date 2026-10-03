@@ -446,7 +446,6 @@ static int gpio_mockup_probe(struct platform_device *pdev)
 	gc->base = base;
 	gc->ngpio = ngpio;
 	gc->label = name;
-	gc->owner = THIS_MODULE;
 	gc->parent = dev;
 	gc->get = gpio_mockup_get;
 	gc->set = gpio_mockup_set;
