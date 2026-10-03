@@ -216,9 +216,7 @@ static int iproc_gpio_probe(struct platform_device *pdev)
 {
 	struct gpio_generic_chip_config config;
 	struct device *dev = &pdev->dev;
-	struct device_node *dn = pdev->dev.of_node;
 	struct iproc_gpio_chip *chip;
-	u32 num_gpios;
 	int irq, ret;
 
 	chip = devm_kzalloc(dev, sizeof(*chip), GFP_KERNEL);
@@ -246,10 +244,6 @@ static int iproc_gpio_probe(struct platform_device *pdev)
 		dev_err(dev, "unable to init GPIO chip\n");
 		return ret;
 	}
-
-	chip->gen_gc.gc.label = dev_name(dev);
-	if (!of_property_read_u32(dn, "ngpios", &num_gpios))
-		chip->gen_gc.gc.ngpio = num_gpios;
 
 	irq = platform_get_irq(pdev, 0);
 	if (irq > 0) {

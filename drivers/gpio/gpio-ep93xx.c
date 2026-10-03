@@ -362,7 +362,6 @@ static int ep93xx_gpio_probe(struct platform_device *pdev)
 	if (ret)
 		return dev_err_probe(&pdev->dev, ret, "unable to init generic GPIO\n");
 
-	gc->label = dev_name(&pdev->dev);
 	if (platform_irq_count(pdev) > 0) {
 		dev_dbg(&pdev->dev, "setting up irqs for %s\n", dev_name(&pdev->dev));
 		ret = ep93xx_setup_irqs(pdev, egc);

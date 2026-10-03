@@ -240,10 +240,7 @@ static int cdns_gpio_probe(struct platform_device *pdev)
 		goto err_revert_dir;
 	}
 
-	cgpio->gen_gc.gc.label = dev_name(&pdev->dev);
 	cgpio->gen_gc.gc.ngpio = num_gpios;
-	cgpio->gen_gc.gc.parent = &pdev->dev;
-	cgpio->gen_gc.gc.base = -1;
 	cgpio->gen_gc.gc.owner = THIS_MODULE;
 	cgpio->gen_gc.gc.request = cdns_gpio_request;
 	cgpio->gen_gc.gc.free = cdns_gpio_free;

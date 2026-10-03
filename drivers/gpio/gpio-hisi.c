@@ -311,7 +311,6 @@ static int hisi_gpio_probe(struct platform_device *pdev)
 
 	hisi_gpio->chip.gc.set_config = hisi_gpio_set_config;
 	hisi_gpio->chip.gc.ngpio = hisi_gpio->line_num;
-	hisi_gpio->chip.gc.base = -1;
 
 	if (hisi_gpio->irq > 0)
 		hisi_gpio_init_irq(hisi_gpio);

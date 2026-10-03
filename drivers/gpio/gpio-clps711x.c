@@ -65,7 +65,6 @@ static int clps711x_gpio_probe(struct platform_device *pdev)
 		break;
 	}
 
-	gen_gc->gc.base = -1;
 	gen_gc->gc.owner = THIS_MODULE;
 
 	return devm_gpiochip_add_data(&pdev->dev, &gen_gc->gc, NULL);

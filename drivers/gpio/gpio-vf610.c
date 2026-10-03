@@ -319,8 +319,6 @@ static int vf610_gpio_probe(struct platform_device *pdev)
 	ret = gpio_generic_chip_init(&port->chip, &config);
 	if (ret)
 		return dev_err_probe(dev, ret, "unable to init generic GPIO\n");
-	gc->label = dev_name(dev);
-	gc->base = -1;
 
 	/* Mask all GPIO interrupts */
 	for (i = 0; i < gc->ngpio; i++)

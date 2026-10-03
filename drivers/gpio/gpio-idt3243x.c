@@ -132,7 +132,6 @@ static int idt_gpio_probe(struct platform_device *pdev)
 	struct gpio_irq_chip *girq;
 	struct idt_gpio_ctrl *ctrl;
 	int parent_irq;
-	int ngpios;
 	int ret;
 
 
@@ -158,10 +157,6 @@ static int idt_gpio_probe(struct platform_device *pdev)
 		dev_err(dev, "failed to initialize the generic GPIO chip\n");
 		return ret;
 	}
-
-	ret = device_property_read_u32(dev, "ngpios", &ngpios);
-	if (!ret)
-		ctrl->chip.gc.ngpio = ngpios;
 
 	if (device_property_read_bool(dev, "interrupt-controller")) {
 		ctrl->pic = devm_platform_ioremap_resource_byname(pdev, "pic");

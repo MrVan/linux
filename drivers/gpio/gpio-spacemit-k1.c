@@ -225,12 +225,10 @@ static int spacemit_gpio_add_bank(struct spacemit_gpio *sg,
 	if (ret)
 		return dev_err_probe(dev, ret, "failed to init gpio chip\n");
 
-	gc->label		= dev_name(dev);
 	gc->request		= gpiochip_generic_request;
 	gc->free		= gpiochip_generic_free;
 	gc->set_config		= gpiochip_generic_config;
 	gc->ngpio		= SPACEMIT_NR_GPIOS_PER_BANK;
-	gc->base		= -1;
 	gc->of_gpio_n_cells	= 3;
 	gc->of_node_instance_match = spacemit_of_node_instance_match;
 

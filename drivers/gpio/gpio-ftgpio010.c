@@ -277,9 +277,6 @@ static int ftgpio_gpio_probe(struct platform_device *pdev)
 	if (ret)
 		return dev_err_probe(dev, ret, "unable to init generic GPIO\n");
 
-	g->chip.gc.label = dev_name(dev);
-	g->chip.gc.base = -1;
-	g->chip.gc.parent = dev;
 	g->chip.gc.owner = THIS_MODULE;
 	/* ngpio is set by gpio_generic_chip_init() */
 

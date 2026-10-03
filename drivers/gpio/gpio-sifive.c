@@ -239,10 +239,7 @@ static int sifive_gpio_probe(struct platform_device *pdev)
 	regmap_write(chip->regs, SIFIVE_GPIO_LOW_IE, 0);
 	chip->irq_state = 0;
 
-	chip->gen_gc.gc.base = -1;
 	chip->gen_gc.gc.ngpio = ngpio;
-	chip->gen_gc.gc.label = dev_name(dev);
-	chip->gen_gc.gc.parent = dev;
 	chip->gen_gc.gc.owner = THIS_MODULE;
 	girq = &chip->gen_gc.gc.irq;
 	gpio_irq_chip_set_chip(girq, &sifive_gpio_irqchip);

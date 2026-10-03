@@ -254,9 +254,7 @@ static int rda_gpio_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	rda_gpio->chip.gc.label = dev_name(dev);
 	rda_gpio->chip.gc.ngpio = ngpios;
-	rda_gpio->chip.gc.base = -1;
 
 	if (rda_gpio->irq >= 0) {
 		girq = &rda_gpio->chip.gc.irq;

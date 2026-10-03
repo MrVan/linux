@@ -129,8 +129,6 @@ static int tb10x_gpio_probe(struct platform_device *pdev)
 		dev_err(dev, "unable to init generic GPIO\n");
 		return ret;
 	}
-	tb10x_gpio->chip.gc.base = -1;
-	tb10x_gpio->chip.gc.parent = dev;
 	tb10x_gpio->chip.gc.owner = THIS_MODULE;
 	/*
 	 * ngpio is set by gpio_generic_chip_init() but we override it, this

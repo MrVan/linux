@@ -214,7 +214,6 @@ static int altera_gpio_probe(struct platform_device *pdev)
 		gc->ngpio = ALTERA_GPIO_MAX_NGPIO;
 	}
 
-	gc->base = -1;
 	gc->label = devm_kasprintf(dev, GFP_KERNEL, "%pfw", dev_fwnode(dev));
 	if (!gc->label)
 		return -ENOMEM;
