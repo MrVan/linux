@@ -1,0 +1,26 @@
+name: arm64 build
+
+on:
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  arm64:
+    runs-on: self-hosted
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Toolchain info
+        run: |
+          uname -m
+          nproc
+          aarch64-linux-gnu-gcc --version | head -1
+
+      - name: Configure (arm64 defconfig)
+        run: make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
+
+      - name: Build kernel + modules (arm64)
+        run: make -j"$(nproc)" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu-
