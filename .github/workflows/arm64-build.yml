@@ -17,6 +17,7 @@ jobs:
         run: |
           uname -m
           nproc
+          make --version | head -1
           aarch64-linux-gnu-gcc --version | head -1
 
       - name: Configure (arm64 defconfig)
