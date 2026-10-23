@@ -1242,6 +1242,24 @@ int arm_smmu_init_one_queue(struct arm_smmu_device *smmu,
 int arm_smmu_cmdq_init(struct arm_smmu_device *smmu,
 		       struct arm_smmu_cmdq *cmdq);
 
+static inline bool arm_smmu_is_shared_sid(struct arm_smmu_master *master)
+{
+	return !list_empty(&master->shared_masters_elm);
+}
+
+/*
+ * The stall fault model is negotiated per device. A shared StreamID cannot
+ * represent differing per-device policies and stall events cannot be
+ * attributed to a single master, so sharing always terminates faults.
+ *
+ * This must be used consistently for CD.S, STE.S1STALLD and STE.S2S: an
+ * implementation can flag C_BAD_CD/C_BAD_STE for a mismatched CD/STE pair.
+ */
+static inline bool arm_smmu_master_stall_enabled(struct arm_smmu_master *master)
+{
+	return master->stall_enabled && !arm_smmu_is_shared_sid(master);
+}
+
 static inline bool arm_smmu_master_canwbs(struct arm_smmu_master *master)
 {
 	return dev_iommu_fwspec_get(master->dev)->flags &

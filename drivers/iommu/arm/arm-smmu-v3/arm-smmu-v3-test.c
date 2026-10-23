@@ -215,6 +215,7 @@ static void arm_smmu_test_make_cdtable_ste(struct arm_smmu_ste *ste,
 		.stall_enabled = stall_enabled,
 	};
 
+	INIT_LIST_HEAD(&master.shared_masters_elm);
 	arm_smmu_make_cdtable_ste(ste, &master, &master.cd_table, ats_enabled,
 				  s1dss);
 	if (feat & ARM_SMMU_MASTER_TEST_NESTED) {
@@ -351,6 +352,7 @@ static void arm_smmu_test_make_s2_ste(struct arm_smmu_ste *ste,
 		.pgtbl_ops = &io_pgtable.ops,
 	};
 
+	INIT_LIST_HEAD(&master.shared_masters_elm);
 	io_pgtable.cfg.arm_lpae_s2_cfg.vttbr = 0xdaedbeefdeadbeefULL;
 	io_pgtable.cfg.arm_lpae_s2_cfg.vtcr.ps = 1;
 	io_pgtable.cfg.arm_lpae_s2_cfg.vtcr.tg = 2;
@@ -493,11 +495,10 @@ static void arm_smmu_v3_test_cd_expect_hitless_transition(
 					      num_syncs_expected, true);
 }
 
-static void arm_smmu_test_make_s1_cd(struct arm_smmu_cd *cd, unsigned int asid)
+static void arm_smmu_test_make_s1_cd_for(struct arm_smmu_cd *cd,
+					 struct arm_smmu_master *master,
+					 unsigned int asid)
 {
-	struct arm_smmu_master master = {
-		.smmu = &smmu,
-	};
 	struct io_pgtable io_pgtable = {};
 	struct arm_smmu_domain smmu_domain = {
 		.pgtbl_ops = &io_pgtable.ops,
@@ -515,7 +516,17 @@ static void arm_smmu_test_make_s1_cd(struct arm_smmu_cd *cd, unsigned int asid)
 	io_pgtable.cfg.arm_lpae_s1_cfg.tcr.tsz = 4;
 	io_pgtable.cfg.arm_lpae_s1_cfg.mair = 0xabcdef012345678ULL;
 
-	arm_smmu_make_s1_cd(cd, &master, &smmu_domain);
+	arm_smmu_make_s1_cd(cd, master, &smmu_domain);
+}
+
+static void arm_smmu_test_make_s1_cd(struct arm_smmu_cd *cd, unsigned int asid)
+{
+	struct arm_smmu_master master = {
+		.smmu = &smmu,
+	};
+
+	INIT_LIST_HEAD(&master.shared_masters_elm);
+	arm_smmu_test_make_s1_cd_for(cd, &master, asid);
 }
 
 static void arm_smmu_v3_write_cd_test_s1_clear(struct kunit *test)
@@ -549,6 +560,7 @@ static void arm_smmu_test_make_sva_cd(struct arm_smmu_cd *cd, unsigned int asid)
 		.smmu = &smmu,
 	};
 
+	INIT_LIST_HEAD(&master.shared_masters_elm);
 	arm_smmu_make_sva_cd(cd, &master, &sva_mm, asid);
 }
 
@@ -559,6 +571,7 @@ static void arm_smmu_test_make_sva_release_cd(struct arm_smmu_cd *cd,
 		.smmu = &smmu,
 	};
 
+	INIT_LIST_HEAD(&master.shared_masters_elm);
 	arm_smmu_make_sva_cd(cd, &master, NULL, asid);
 }
 
@@ -584,6 +597,48 @@ static void arm_smmu_v3_write_ste_test_s2_to_s1_stall(struct kunit *test)
 	arm_smmu_test_make_s2_ste(&s2_ste, ARM_SMMU_MASTER_TEST_STALL);
 	arm_smmu_v3_test_ste_expect_hitless_transition(test, &s2_ste, &s1_ste,
 						       NUM_EXPECTED_SYNCS(3));
+}
+
+static void arm_smmu_v3_stall_cd_ste_consistency(struct kunit *test)
+{
+	struct arm_smmu_master sharer = {};
+	struct arm_smmu_master master = {
+		.smmu = &smmu,
+		.cd_table.cdtab_dma = fake_cdtab_dma_addr,
+		.cd_table.s1cdmax = 0xFF,
+		.cd_table.s1fmt = STRTAB_STE_0_S1FMT_64K_L2,
+	};
+	struct arm_smmu_cd cd;
+	struct arm_smmu_ste ste;
+
+	INIT_LIST_HEAD(&sharer.shared_masters_elm);
+	INIT_LIST_HEAD(&master.shared_masters_elm);
+
+	/* A terminating master must not set CD.S. */
+	arm_smmu_test_make_s1_cd_for(&cd, &master, 1);
+	arm_smmu_make_cdtable_ste(&ste, &master, &master.cd_table, false,
+				  STRTAB_STE_1_S1DSS_SSID0);
+	KUNIT_EXPECT_FALSE(test, cd.data[0] & cpu_to_le64(CTXDESC_CD_0_S));
+	KUNIT_EXPECT_TRUE(test,
+			  ste.data[1] & cpu_to_le64(STRTAB_STE_1_S1STALLD));
+
+	/* A stalling master sets CD.S and clears STE.S1STALLD. */
+	master.stall_enabled = true;
+	arm_smmu_test_make_s1_cd_for(&cd, &master, 1);
+	arm_smmu_make_cdtable_ste(&ste, &master, &master.cd_table, false,
+				  STRTAB_STE_1_S1DSS_SSID0);
+	KUNIT_EXPECT_TRUE(test, cd.data[0] & cpu_to_le64(CTXDESC_CD_0_S));
+	KUNIT_EXPECT_FALSE(test,
+			   ste.data[1] & cpu_to_le64(STRTAB_STE_1_S1STALLD));
+
+	/* Sharing forces stall off in both the CD and the STE. */
+	list_add(&sharer.shared_masters_elm, &master.shared_masters_elm);
+	arm_smmu_test_make_s1_cd_for(&cd, &master, 1);
+	arm_smmu_make_cdtable_ste(&ste, &master, &master.cd_table, false,
+				  STRTAB_STE_1_S1DSS_SSID0);
+	KUNIT_EXPECT_FALSE(test, cd.data[0] & cpu_to_le64(CTXDESC_CD_0_S));
+	KUNIT_EXPECT_TRUE(test,
+			  ste.data[1] & cpu_to_le64(STRTAB_STE_1_S1STALLD));
 }
 
 static void
@@ -812,6 +867,7 @@ static struct kunit_case arm_smmu_v3_test_cases[] = {
 	KUNIT_CASE(arm_smmu_v3_write_cd_test_s1_change_asid),
 	KUNIT_CASE(arm_smmu_v3_write_ste_test_s1_to_s2_stall),
 	KUNIT_CASE(arm_smmu_v3_write_ste_test_s2_to_s1_stall),
+	KUNIT_CASE(arm_smmu_v3_stall_cd_ste_consistency),
 	KUNIT_CASE(arm_smmu_v3_write_ste_test_nested_s1dssbypass_to_s1bypass),
 	KUNIT_CASE(arm_smmu_v3_write_ste_test_nested_s1bypass_to_s1dssbypass),
 	KUNIT_CASE(arm_smmu_v3_write_cd_test_sva_clear),

@@ -1692,7 +1692,8 @@ void arm_smmu_make_s1_cd(struct arm_smmu_cd *target,
 		CTXDESC_CD_0_V |
 		FIELD_PREP(CTXDESC_CD_0_TCR_IPS, tcr->ips) |
 		CTXDESC_CD_0_AA64 |
-		(master->stall_enabled ? CTXDESC_CD_0_S : 0) |
+		(arm_smmu_master_stall_enabled(master) ?
+			 CTXDESC_CD_0_S : 0) |
 		CTXDESC_CD_0_R |
 		CTXDESC_CD_0_A |
 		CTXDESC_CD_0_ASET |
@@ -1947,7 +1948,7 @@ void arm_smmu_make_cdtable_ste(struct arm_smmu_ste *target,
 		FIELD_PREP(STRTAB_STE_1_S1COR, STRTAB_STE_1_S1C_CACHE_WBRA) |
 		FIELD_PREP(STRTAB_STE_1_S1CSH, ARM_SMMU_SH_ISH) |
 		((smmu->features & ARM_SMMU_FEAT_STALLS &&
-		  !master->stall_enabled) ?
+		  !arm_smmu_master_stall_enabled(master)) ?
 			 STRTAB_STE_1_S1STALLD :
 			 0) |
 		FIELD_PREP(STRTAB_STE_1_EATS,
@@ -2034,7 +2035,8 @@ void arm_smmu_make_s2_domain_ste(struct arm_smmu_ste *target,
 		STRTAB_STE_2_S2ENDI |
 #endif
 		STRTAB_STE_2_S2PTW |
-		(master->stall_enabled ? STRTAB_STE_2_S2S : 0) |
+		(arm_smmu_master_stall_enabled(master) ?
+			 STRTAB_STE_2_S2S : 0) |
 		STRTAB_STE_2_S2R);
 
 	target->data[3] = cpu_to_le64(pgtbl_cfg->arm_lpae_s2_cfg.vttbr &
@@ -3194,6 +3196,20 @@ arm_smmu_get_step_for_sid(struct arm_smmu_device *smmu, u32 sid)
 	}
 }
 
+static bool arm_smmu_ste_is_release(const struct arm_smmu_ste *target)
+{
+	u64 data0 = le64_to_cpu(target->data[0]);
+	u64 data1 = le64_to_cpu(target->data[1]);
+
+	if (FIELD_GET(STRTAB_STE_0_CFG, data0) == STRTAB_STE_0_CFG_ABORT)
+		return true;
+
+	return FIELD_GET(STRTAB_STE_0_CFG, data0) ==
+		       STRTAB_STE_0_CFG_S1_TRANS &&
+	       FIELD_GET(STRTAB_STE_1_S1DSS, data1) ==
+		       STRTAB_STE_1_S1DSS_TERMINATE;
+}
+
 void arm_smmu_install_ste_for_dev(struct arm_smmu_master *master,
 				  const struct arm_smmu_ste *target)
 {
@@ -3209,8 +3225,7 @@ void arm_smmu_install_ste_for_dev(struct arm_smmu_master *master,
 
 	for (i = 0; i < master->num_streams; ++i) {
 		u32 sid = master->streams[i]->id;
-		struct arm_smmu_ste *step =
-			arm_smmu_get_step_for_sid(smmu, sid);
+		struct arm_smmu_ste *step;
 
 		/* Bridged PCI devices may end up with duplicated IDs */
 		for (j = 0; j < i; j++)
@@ -3219,6 +3234,19 @@ void arm_smmu_install_ste_for_dev(struct arm_smmu_master *master,
 		if (j < i)
 			continue;
 
+		/*
+		 * A shared STE represents the group's domain, not a single
+		 * master. Every sharer builds the same normal-domain STE, so
+		 * any of them may program it. A release/blocked attach would
+		 * instead abort the translation for the surviving sharers;
+		 * skip it until the last master (no longer shared) tears the
+		 * STE down.
+		 */
+		if (arm_smmu_is_shared_sid(master) &&
+		    arm_smmu_ste_is_release(target))
+			continue;
+
+		step = arm_smmu_get_step_for_sid(smmu, sid);
 		arm_smmu_write_ste(master, sid, step, target);
 	}
 }
@@ -3228,6 +3256,9 @@ static bool arm_smmu_ats_supported(struct arm_smmu_master *master)
 	struct device *dev = master->dev;
 	struct arm_smmu_device *smmu = master->smmu;
 	struct iommu_fwspec *fwspec = dev_iommu_fwspec_get(dev);
+
+	if (arm_smmu_is_shared_sid(master))
+		return false;
 
 	if (!(smmu->features & ARM_SMMU_FEAT_ATS))
 		return false;
@@ -3366,8 +3397,7 @@ static int arm_smmu_enable_iopf(struct arm_smmu_master *master,
 	if (!master->stall_enabled)
 		return 0;
 
-	/* We're not keeping track of SIDs in fault events */
-	if (master->num_streams != 1)
+	if (master->num_streams != 1 || arm_smmu_is_shared_sid(master))
 		return -EOPNOTSUPP;
 
 	if (master->iopf_refcount) {
@@ -3889,7 +3919,7 @@ static int arm_smmu_attach_dev(struct iommu_domain *domain, struct device *dev,
 		 * terminate faults.
 		 */
 		if (master->ats_always_on ||
-		    master->stall_enabled ||
+		    arm_smmu_master_stall_enabled(master) ||
 		    arm_smmu_ssids_in_use(&master->cd_table)) {
 			cd_table = &master->cd_table;
 			cdptr = arm_smmu_alloc_cd_ptr(master, IOMMU_NO_PASID);
@@ -3961,6 +3991,9 @@ static int arm_smmu_s1_set_dev_pasid(struct iommu_domain *domain,
 
 	if (smmu_domain->stage != ARM_SMMU_DOMAIN_S1)
 		return -EINVAL;
+
+	if (arm_smmu_is_shared_sid(master))
+		return -EOPNOTSUPP;
 
 	/*
 	 * We can read cd.asid outside the lock because arm_smmu_set_pasid()
@@ -4490,9 +4523,20 @@ static int arm_smmu_insert_master(struct arm_smmu_device *smmu,
 				break;
 			}
 
-			if (stream->master->stall_enabled) {
+			if (stream->master->stall_enabled ||
+			    master->stall_enabled) {
 				dev_warn(master->dev,
-					 "Shared StreamID 0x%x rejected: existing master has stall enabled\n",
+					 "Shared StreamID 0x%x rejected: stall enabled\n",
+					 sid);
+				ret = -EBUSY;
+				break;
+			}
+
+			if (stream->master->ats_always_on ||
+			    stream->master->ats_enabled ||
+			    arm_smmu_ssids_in_use(&stream->master->cd_table)) {
+				dev_warn(master->dev,
+					 "Shared StreamID 0x%x rejected: existing master has PASID/ATS enabled\n",
 					 sid);
 				ret = -EBUSY;
 				break;
@@ -4614,6 +4658,16 @@ static struct iommu_device *arm_smmu_probe_device(struct device *dev)
 	master->smmu = smmu;
 	dev_iommu_priv_set(dev, master);
 
+	/*
+	 * Resolve the stall policy before inserting the master. StreamID
+	 * sharing is rejected when either device wants stalling, and the
+	 * insert path needs to know the incoming master's policy.
+	 */
+	if ((smmu->features & ARM_SMMU_FEAT_STALLS &&
+	     device_property_read_bool(dev, "dma-can-stall")) ||
+	    smmu->features & ARM_SMMU_FEAT_STALL_FORCE)
+		master->stall_enabled = true;
+
 	ret = arm_smmu_insert_master(smmu, master);
 	if (ret)
 		goto err_free_master;
@@ -4634,11 +4688,6 @@ static struct iommu_device *arm_smmu_probe_device(struct device *dev)
 	if (!(smmu->features & ARM_SMMU_FEAT_2_LVL_CDTAB))
 		master->ssid_bits = min_t(u8, master->ssid_bits,
 					  CTXDESC_LINEAR_CDMAX);
-
-	if ((smmu->features & ARM_SMMU_FEAT_STALLS &&
-	     device_property_read_bool(dev, "dma-can-stall")) ||
-	    smmu->features & ARM_SMMU_FEAT_STALL_FORCE)
-		master->stall_enabled = true;
 
 	ret = arm_smmu_master_prepare_ats(master);
 	if (ret)
