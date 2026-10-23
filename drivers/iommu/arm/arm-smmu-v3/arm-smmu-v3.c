@@ -2124,6 +2124,8 @@ arm_smmu_find_master(struct arm_smmu_device *smmu, u32 sid)
 	stream = arm_smmu_find_stream(smmu, sid);
 	if (!stream)
 		return NULL;
+	if (!list_empty(&stream->shared_masters))
+		return NULL;
 	return stream->master;
 }
 
@@ -4415,10 +4417,26 @@ static void arm_smmu_free_master_streams(struct arm_smmu_master *master)
 	lockdep_assert_held(&smmu->streams_mutex);
 
 	for (i = 0; i < master->num_streams; i++) {
-		if (!master->streams[i])
+		struct arm_smmu_stream *stream = master->streams[i];
+
+		if (!stream)
 			continue;
-		rb_erase(&master->streams[i]->node, &smmu->streams);
-		kfree(master->streams[i]);
+
+		if (!list_empty(&stream->shared_masters)) {
+			struct arm_smmu_master *next;
+
+			list_del_init(&master->shared_masters_elm);
+			next = list_first_entry(&stream->shared_masters,
+						struct arm_smmu_master,
+						shared_masters_elm);
+			if (stream->master == master)
+				stream->master = next;
+			if (list_is_singular(&stream->shared_masters))
+				list_del_init(&next->shared_masters_elm);
+			continue;
+		}
+		rb_erase(&stream->node, &smmu->streams);
+		kfree(stream);
 	}
 }
 
@@ -4446,6 +4464,7 @@ static int arm_smmu_insert_master(struct arm_smmu_device *smmu,
 		kfree(master->streams);
 		return -ENOMEM;
 	}
+	INIT_LIST_HEAD(&master->shared_masters_elm);
 
 	mutex_lock(&smmu->streams_mutex);
 	for (i = 0, n = 0; i < fwspec->num_ids; i++) {
@@ -4462,11 +4481,30 @@ static int arm_smmu_insert_master(struct arm_smmu_device *smmu,
 			if (stream->master == master)
 				continue;
 
-			dev_warn(master->dev,
-				 "Aliasing StreamID 0x%x (from %s) unsupported, expect DMA to be broken\n",
-				 sid, dev_name(stream->master->dev));
-			ret = -ENODEV;
-			break;
+			if (fwspec->num_ids != 1 ||
+			    stream->master->num_streams != 1) {
+				dev_warn(master->dev,
+					 "Shared StreamID 0x%x not supported for multi-SID masters\n",
+					 sid);
+				ret = -ENODEV;
+				break;
+			}
+
+			if (stream->master->stall_enabled) {
+				dev_warn(master->dev,
+					 "Shared StreamID 0x%x rejected: existing master has stall enabled\n",
+					 sid);
+				ret = -EBUSY;
+				break;
+			}
+
+			if (list_empty(&stream->shared_masters))
+				list_add_tail(&stream->master->shared_masters_elm,
+					      &stream->shared_masters);
+			list_add_tail(&master->shared_masters_elm,
+				      &stream->shared_masters);
+			master->streams[n++] = stream;
+			continue;
 		}
 
 		stream = kzalloc_obj(*stream, GFP_KERNEL);
@@ -4476,6 +4514,7 @@ static int arm_smmu_insert_master(struct arm_smmu_device *smmu,
 		}
 		stream->id = sid;
 		stream->master = master;
+		INIT_LIST_HEAD(&stream->shared_masters);
 
 		rb_find_add(&stream->node, &smmu->streams,
 			    arm_smmu_streams_cmp_node);
