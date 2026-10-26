@@ -1832,6 +1832,17 @@ static void arm_smmu_free_master_cd_tables(struct arm_smmu_master *master)
 	arm_smmu_free_cd_tables(master->smmu, &master->cd_table);
 }
 
+static int arm_smmu_alloc_domain_cd_tables(struct arm_smmu_domain *smmu_domain)
+{
+	return arm_smmu_alloc_cd_tables(smmu_domain->smmu,
+					&smmu_domain->cd_table, 0, false);
+}
+
+static void arm_smmu_free_domain_cd_tables(struct arm_smmu_domain *smmu_domain)
+{
+	arm_smmu_free_cd_tables(smmu_domain->smmu, &smmu_domain->cd_table);
+}
+
 /* Stream table manipulation functions */
 static void arm_smmu_write_strtab_l1_desc(struct arm_smmu_strtab_l1 *dst,
 					  dma_addr_t l2ptr_dma)
@@ -3044,6 +3055,9 @@ static void arm_smmu_domain_free_paging(struct iommu_domain *domain)
 		mutex_lock(&arm_smmu_asid_lock);
 		xa_erase(&arm_smmu_asid_xa, smmu_domain->cd.asid);
 		mutex_unlock(&arm_smmu_asid_lock);
+
+		if (arm_smmu_cdtab_allocated(&smmu_domain->cd_table))
+			arm_smmu_free_domain_cd_tables(smmu_domain);
 	} else {
 		struct arm_smmu_s2_cfg *cfg = &smmu_domain->s2_cfg;
 		if (cfg->vmid)
@@ -3135,6 +3149,15 @@ static int arm_smmu_domain_finalise(struct arm_smmu_domain *smmu_domain,
 	if (!pgtbl_ops)
 		return -ENOMEM;
 
+	smmu_domain->smmu = smmu;
+	if (smmu_domain->stage == ARM_SMMU_DOMAIN_S1) {
+		ret = arm_smmu_alloc_domain_cd_tables(smmu_domain);
+		if (ret) {
+			free_io_pgtable_ops(pgtbl_ops);
+			return ret;
+		}
+	}
+
 	smmu_domain->domain.pgsize_bitmap = pgtbl_cfg.pgsize_bitmap;
 	smmu_domain->tgsz_lg2 = __ffs(pgtbl_cfg.pgsize_bitmap);
 	smmu_domain->domain.geometry.aperture_end = (1UL << pgtbl_cfg.ias) - 1;
@@ -3144,12 +3167,13 @@ static int arm_smmu_domain_finalise(struct arm_smmu_domain *smmu_domain,
 
 	ret = finalise_stage_fn(smmu, smmu_domain);
 	if (ret < 0) {
+		if (smmu_domain->stage == ARM_SMMU_DOMAIN_S1)
+			arm_smmu_free_domain_cd_tables(smmu_domain);
 		free_io_pgtable_ops(pgtbl_ops);
 		return ret;
 	}
 
 	smmu_domain->pgtbl_ops = pgtbl_ops;
-	smmu_domain->smmu = smmu;
 	return 0;
 }
 
@@ -3842,6 +3866,7 @@ static int arm_smmu_attach_dev(struct iommu_domain *domain, struct device *dev,
 		.ssid = IOMMU_NO_PASID,
 	};
 	struct arm_smmu_master *master;
+	struct arm_smmu_ctx_desc_cfg *cd_table = NULL;
 	struct arm_smmu_cd *cdptr;
 
 	if (!fwspec)
@@ -3854,11 +3879,27 @@ static int arm_smmu_attach_dev(struct iommu_domain *domain, struct device *dev,
 		return -EINVAL;
 
 	if (smmu_domain->stage == ARM_SMMU_DOMAIN_S1) {
-		cdptr = arm_smmu_alloc_cd_ptr(master, IOMMU_NO_PASID);
+		/*
+		 * Non-PASID devices use the domain's shared CD table. The
+		 * private table is needed for substreams (PASID), for
+		 * ATS-always-on (S1DSS), and for the stall model: CD.S is a
+		 * per-CD property and cannot be shared by devices that
+		 * terminate faults.
+		 */
+		if (master->ats_always_on ||
+		    master->stall_enabled ||
+		    arm_smmu_ssids_in_use(&master->cd_table)) {
+			cd_table = &master->cd_table;
+			cdptr = arm_smmu_alloc_cd_ptr(master, IOMMU_NO_PASID);
+		} else {
+			cd_table = &smmu_domain->cd_table;
+			cdptr = arm_smmu_get_cd_ptr_in(cd_table, IOMMU_NO_PASID);
+		}
 		if (!cdptr)
 			return -ENOMEM;
-	} else if (arm_smmu_ssids_in_use(&master->cd_table))
+	} else if (arm_smmu_ssids_in_use(&master->cd_table)) {
 		return -EBUSY;
+	}
 
 	/*
 	 * Prevent arm_smmu_share_asid() from trying to change the ASID
@@ -3881,7 +3922,7 @@ static int arm_smmu_attach_dev(struct iommu_domain *domain, struct device *dev,
 		arm_smmu_make_s1_cd(&target_cd, master, smmu_domain);
 		arm_smmu_write_cd_entry(master, IOMMU_NO_PASID, cdptr,
 					&target_cd);
-		arm_smmu_make_cdtable_ste(&target, master, &master->cd_table,
+		arm_smmu_make_cdtable_ste(&target, master, cd_table,
 					  state.ats_enabled,
 					  STRTAB_STE_1_S1DSS_SSID0);
 		arm_smmu_install_ste_for_dev(master, &target);
@@ -3932,22 +3973,24 @@ static void arm_smmu_update_ste(struct arm_smmu_master *master,
 				struct iommu_domain *sid_domain,
 				bool ats_enabled)
 {
-	unsigned int s1dss = STRTAB_STE_1_S1DSS_TERMINATE;
+	unsigned int s1dss;
 	struct arm_smmu_ste ste;
-
-	if (master->cd_table.in_ste && master->ste_ats_enabled == ats_enabled)
-		return;
 
 	if (sid_domain->type == IOMMU_DOMAIN_IDENTITY)
 		s1dss = STRTAB_STE_1_S1DSS_BYPASS;
-	else
-		WARN_ON(sid_domain->type != IOMMU_DOMAIN_BLOCKED);
+	else if (sid_domain->type == IOMMU_DOMAIN_BLOCKED)
+		s1dss = STRTAB_STE_1_S1DSS_TERMINATE;
+	else if (sid_domain->type & __IOMMU_DOMAIN_PAGING)
+		s1dss = STRTAB_STE_1_S1DSS_SSID0;
+	else {
+		WARN_ON(1);
+		return;
+	}
 
 	/*
-	 * Change the STE into a cdtable one with SID IDENTITY/BLOCKED behavior
-	 * using s1dss if necessary. If the cd_table is already installed then
-	 * the S1DSS is correct and this will just update the EATS. Otherwise it
-	 * installs the entire thing. This will be hitless.
+	 * The PASID entries live in the private per-master CD table, so make
+	 * sure the STE points there even when the RID domain was previously
+	 * using the domain's shared CD table.
 	 */
 	arm_smmu_make_cdtable_ste(&ste, master, &master->cd_table, ats_enabled,
 				  s1dss);
@@ -3965,7 +4008,8 @@ int arm_smmu_set_pasid(struct arm_smmu_master *master,
 		.ssid = pasid,
 		.old_domain = old,
 	};
-	struct arm_smmu_cd *cdptr;
+	struct arm_smmu_cd *cdptr, *cd0ptr = NULL;
+	bool first;
 	int ret;
 
 	/* The core code validates pasid */
@@ -3978,9 +4022,16 @@ int arm_smmu_set_pasid(struct arm_smmu_master *master,
 	    sid_domain->type != IOMMU_DOMAIN_BLOCKED)
 		return -EINVAL;
 
+	first = !arm_smmu_ssids_in_use(&master->cd_table);
 	cdptr = arm_smmu_alloc_cd_ptr(master, pasid);
 	if (!cdptr)
 		return -ENOMEM;
+
+	if (first) {
+		cd0ptr = arm_smmu_alloc_cd_ptr(master, IOMMU_NO_PASID);
+		if (!cd0ptr)
+			return -ENOMEM;
+	}
 
 	mutex_lock(&arm_smmu_asid_lock);
 	ret = arm_smmu_attach_prepare(&state, &smmu_domain->domain);
@@ -3997,8 +4048,39 @@ int arm_smmu_set_pasid(struct arm_smmu_master *master,
 	cd->data[0] |= cpu_to_le64(
 		FIELD_PREP(CTXDESC_CD_0_ASID, smmu_domain->cd.asid));
 
+	/*
+	 * The private CD table is taking over the STE now. Make sure its
+	 * default substream matches the RID domain before the STE points at
+	 * it, since non-PASID traffic follows CD[0].
+	 */
+	if (first) {
+		if ((sid_domain->type & __IOMMU_DOMAIN_PAGING) &&
+		    to_smmu_domain(sid_domain)->stage == ARM_SMMU_DOMAIN_S1) {
+			struct arm_smmu_cd cd0;
+
+			arm_smmu_make_s1_cd(&cd0, master,
+					    to_smmu_domain(sid_domain));
+			arm_smmu_write_cd_entry(master, IOMMU_NO_PASID,
+						cd0ptr, &cd0);
+		} else if (sid_domain->type == IOMMU_DOMAIN_IDENTITY ||
+			   sid_domain->type == IOMMU_DOMAIN_BLOCKED) {
+			arm_smmu_clear_cd(master, IOMMU_NO_PASID);
+		} else {
+			WARN_ON(1);
+		}
+	}
+
 	arm_smmu_write_cd_entry(master, pasid, cdptr, cd);
-	arm_smmu_update_ste(master, sid_domain, state.ats_enabled);
+
+	/*
+	 * A repeat PASID attach leaves the STE on the private table with the
+	 * same S1DSS/EATS. Only the first attach (or an ATS change) needs to
+	 * rewrite it; arm_smmu_write_ste() would otherwise issue a redundant
+	 * CMD_PREFETCH_CFG for every stream.
+	 */
+	if (first || !master->cd_table.in_ste ||
+	    master->ste_ats_enabled != state.ats_enabled)
+		arm_smmu_update_ste(master, sid_domain, state.ats_enabled);
 
 	arm_smmu_attach_commit(&state);
 	mutex_unlock(&arm_smmu_asid_lock);
@@ -4017,35 +4099,48 @@ static int arm_smmu_blocking_set_dev_pasid(struct iommu_domain *new_domain,
 		.old_domain = old_domain,
 		.ssid = pasid,
 	};
+	int ret = 0;
 
 	mutex_lock(&arm_smmu_asid_lock);
 	arm_smmu_attach_prepare_invs(&state, NULL);
+	/*
+	 * Unlink the PASID from the domain before invalidating its CD.
+	 * arm_smmu_mm_release() walks this list with only devices_lock held
+	 * and writes a valid, faulting CD; unlinking first prevents it from
+	 * resurrecting used_ssids after the last PASID is detached.
+	 */
+	state.old_master_domain = arm_smmu_remove_master_domain(
+		master, &smmu_domain->domain, pasid);
 	arm_smmu_clear_cd(master, pasid);
 	if (master->ats_enabled)
 		arm_smmu_atc_inv_master(master, pasid);
-	state.old_master_domain = arm_smmu_remove_master_domain(
-		master, &smmu_domain->domain, pasid);
 	arm_smmu_install_old_domain_invs(&state);
 	mutex_unlock(&arm_smmu_asid_lock);
 	arm_smmu_attach_release(&state);
 
 	/*
-	 * When the last user of the CD table goes away downgrade the STE back
-	 * to a non-cd_table one, by re-attaching its sid_domain.
+	 * When the last user of the CD table goes away, switch the STE back to
+	 * the domain's shared CD table (S1) or to the native bypass/abort STE
+	 * (identity/blocked), by re-attaching its sid_domain. The private CD
+	 * table is kept allocated for reuse and freed when the device goes
+	 * away.
 	 */
 	if (!arm_smmu_ssids_in_use(&master->cd_table)) {
 		struct iommu_domain *sid_domain =
 			iommu_driver_get_domain_for_dev(master->dev);
 		bool ats_always_on = master->ats_always_on &&
 				     sid_domain->type != IOMMU_DOMAIN_BLOCKED;
-		bool downgrade = sid_domain->type == IOMMU_DOMAIN_IDENTITY ||
-				 sid_domain->type == IOMMU_DOMAIN_BLOCKED;
+		bool s1 = (sid_domain->type & __IOMMU_DOMAIN_PAGING) &&
+			  to_smmu_domain(sid_domain)->stage ==
+				  ARM_SMMU_DOMAIN_S1;
 
-		if (!ats_always_on && downgrade)
-			sid_domain->ops->attach_dev(sid_domain, dev,
-						    sid_domain);
+		if (!ats_always_on &&
+		    (s1 || sid_domain->type == IOMMU_DOMAIN_IDENTITY ||
+		     sid_domain->type == IOMMU_DOMAIN_BLOCKED))
+			ret = sid_domain->ops->attach_dev(sid_domain, dev,
+							  sid_domain);
 	}
-	return 0;
+	return ret;
 }
 
 static void arm_smmu_attach_dev_ste(struct iommu_domain *domain,
