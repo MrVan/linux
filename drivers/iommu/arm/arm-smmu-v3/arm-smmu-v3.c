@@ -122,7 +122,7 @@ static const char * const event_class_str[] = {
 	[3] = "Reserved",
 };
 
-static int arm_smmu_alloc_cd_tables(struct arm_smmu_master *master);
+static int arm_smmu_alloc_master_cd_tables(struct arm_smmu_master *master);
 static bool arm_smmu_ats_supported(struct arm_smmu_master *master);
 
 static void parse_driver_options(struct arm_smmu_device *smmu)
@@ -1545,11 +1545,10 @@ static dma_addr_t arm_smmu_cd_l1_get_desc(const struct arm_smmu_cdtab_l1 *src)
 	return le64_to_cpu(src->l2ptr) & CTXDESC_L1_DESC_L2PTR_MASK;
 }
 
-struct arm_smmu_cd *arm_smmu_get_cd_ptr(struct arm_smmu_master *master,
-					u32 ssid)
+static struct arm_smmu_cd *
+arm_smmu_get_cd_ptr_in(struct arm_smmu_ctx_desc_cfg *cd_table, u32 ssid)
 {
 	struct arm_smmu_cdtab_l2 *l2;
-	struct arm_smmu_ctx_desc_cfg *cd_table = &master->cd_table;
 
 	if (!arm_smmu_cdtab_allocated(cd_table))
 		return NULL;
@@ -1563,6 +1562,12 @@ struct arm_smmu_cd *arm_smmu_get_cd_ptr(struct arm_smmu_master *master,
 	return &l2->cds[arm_smmu_cdtab_l2_idx(ssid)];
 }
 
+struct arm_smmu_cd *arm_smmu_get_cd_ptr(struct arm_smmu_master *master,
+					u32 ssid)
+{
+	return arm_smmu_get_cd_ptr_in(&master->cd_table, ssid);
+}
+
 static struct arm_smmu_cd *arm_smmu_alloc_cd_ptr(struct arm_smmu_master *master,
 						 u32 ssid)
 {
@@ -1573,7 +1578,7 @@ static struct arm_smmu_cd *arm_smmu_alloc_cd_ptr(struct arm_smmu_master *master,
 	iommu_group_mutex_assert(master->dev);
 
 	if (!arm_smmu_cdtab_allocated(cd_table)) {
-		if (arm_smmu_alloc_cd_tables(master))
+		if (arm_smmu_alloc_master_cd_tables(master))
 			return NULL;
 	}
 
@@ -1595,7 +1600,7 @@ static struct arm_smmu_cd *arm_smmu_alloc_cd_ptr(struct arm_smmu_master *master,
 			arm_smmu_sync_cd(master, ssid, false);
 		}
 	}
-	return arm_smmu_get_cd_ptr(master, ssid);
+	return arm_smmu_get_cd_ptr_in(cd_table, ssid);
 }
 
 struct arm_smmu_cd_writer {
@@ -1721,15 +1726,15 @@ void arm_smmu_clear_cd(struct arm_smmu_master *master, ioasid_t ssid)
 	arm_smmu_write_cd_entry(master, ssid, cdptr, &target);
 }
 
-static int arm_smmu_alloc_cd_tables(struct arm_smmu_master *master)
+static int arm_smmu_alloc_cd_tables(struct arm_smmu_device *smmu,
+				    struct arm_smmu_ctx_desc_cfg *cd_table,
+				    u8 ssid_bits, bool ats_always_on)
 {
 	int ret;
 	size_t l1size;
 	size_t max_contexts;
-	struct arm_smmu_device *smmu = master->smmu;
-	struct arm_smmu_ctx_desc_cfg *cd_table = &master->cd_table;
 
-	cd_table->s1cdmax = master->ssid_bits;
+	cd_table->s1cdmax = ssid_bits;
 
 	/*
 	 * When a device doesn't support PASID (non default SSID), ssid_bits is
@@ -1744,7 +1749,7 @@ static int arm_smmu_alloc_cd_tables(struct arm_smmu_master *master)
 	 * Set S1CDMAX no lower than 1. This would add a dummy substream in the
 	 * CD table but it should never be used by an actual CD.
 	 */
-	if (master->ats_always_on)
+	if (ats_always_on)
 		cd_table->s1cdmax = max_t(u8, cd_table->s1cdmax, 1);
 	max_contexts = 1 << cd_table->s1cdmax;
 
@@ -1786,11 +1791,17 @@ err_free_l2ptrs:
 	return ret;
 }
 
-static void arm_smmu_free_cd_tables(struct arm_smmu_master *master)
+static int arm_smmu_alloc_master_cd_tables(struct arm_smmu_master *master)
+{
+	return arm_smmu_alloc_cd_tables(master->smmu, &master->cd_table,
+					master->ssid_bits,
+					master->ats_always_on);
+}
+
+static void arm_smmu_free_cd_tables(struct arm_smmu_device *smmu,
+				    struct arm_smmu_ctx_desc_cfg *cd_table)
 {
 	int i;
-	struct arm_smmu_device *smmu = master->smmu;
-	struct arm_smmu_ctx_desc_cfg *cd_table = &master->cd_table;
 
 	if (cd_table->s1fmt != STRTAB_STE_0_S1FMT_LINEAR) {
 		for (i = 0; i < cd_table->l2.num_l1_ents; i++) {
@@ -1814,6 +1825,11 @@ static void arm_smmu_free_cd_tables(struct arm_smmu_master *master)
 					  sizeof(struct arm_smmu_cd),
 				  cd_table->linear.table, cd_table->cdtab_dma);
 	}
+}
+
+static void arm_smmu_free_master_cd_tables(struct arm_smmu_master *master)
+{
+	arm_smmu_free_cd_tables(master->smmu, &master->cd_table);
 }
 
 /* Stream table manipulation functions */
@@ -1900,10 +1916,10 @@ EXPORT_SYMBOL_IF_KUNIT(arm_smmu_make_bypass_ste);
 
 VISIBLE_IF_KUNIT
 void arm_smmu_make_cdtable_ste(struct arm_smmu_ste *target,
-			       struct arm_smmu_master *master, bool ats_enabled,
-			       unsigned int s1dss)
+			       struct arm_smmu_master *master,
+			       struct arm_smmu_ctx_desc_cfg *cd_table,
+			       bool ats_enabled, unsigned int s1dss)
 {
-	struct arm_smmu_ctx_desc_cfg *cd_table = &master->cd_table;
 	struct arm_smmu_device *smmu = master->smmu;
 
 	memset(target, 0, sizeof(*target));
@@ -3865,7 +3881,8 @@ static int arm_smmu_attach_dev(struct iommu_domain *domain, struct device *dev,
 		arm_smmu_make_s1_cd(&target_cd, master, smmu_domain);
 		arm_smmu_write_cd_entry(master, IOMMU_NO_PASID, cdptr,
 					&target_cd);
-		arm_smmu_make_cdtable_ste(&target, master, state.ats_enabled,
+		arm_smmu_make_cdtable_ste(&target, master, &master->cd_table,
+					  state.ats_enabled,
 					  STRTAB_STE_1_S1DSS_SSID0);
 		arm_smmu_install_ste_for_dev(master, &target);
 		break;
@@ -3932,7 +3949,8 @@ static void arm_smmu_update_ste(struct arm_smmu_master *master,
 	 * the S1DSS is correct and this will just update the EATS. Otherwise it
 	 * installs the entire thing. This will be hitless.
 	 */
-	arm_smmu_make_cdtable_ste(&ste, master, ats_enabled, s1dss);
+	arm_smmu_make_cdtable_ste(&ste, master, &master->cd_table, ats_enabled,
+				  s1dss);
 	arm_smmu_install_ste_for_dev(master, &ste);
 }
 
@@ -4065,7 +4083,8 @@ static void arm_smmu_attach_dev_ste(struct iommu_domain *domain,
 		 */
 		state.cd_needs_ats = true;
 		arm_smmu_attach_prepare(&state, domain);
-		arm_smmu_make_cdtable_ste(ste, master, state.ats_enabled, s1dss);
+		arm_smmu_make_cdtable_ste(ste, master, &master->cd_table,
+					  state.ats_enabled, s1dss);
 	} else {
 		arm_smmu_attach_prepare(&state, domain);
 	}
@@ -4436,7 +4455,7 @@ static int arm_smmu_master_prepare_ats(struct arm_smmu_master *master)
 
 	master->ats_always_on = true;
 
-	return arm_smmu_alloc_cd_tables(master);
+	return arm_smmu_alloc_master_cd_tables(master);
 }
 
 static struct iommu_device *arm_smmu_probe_device(struct device *dev)
@@ -4510,7 +4529,7 @@ static void arm_smmu_release_device(struct device *dev)
 	arm_smmu_disable_pasid(master);
 	arm_smmu_remove_master(master);
 	if (arm_smmu_cdtab_allocated(&master->cd_table))
-		arm_smmu_free_cd_tables(master);
+		arm_smmu_free_master_cd_tables(master);
 	kfree(master);
 }
 
