@@ -26,6 +26,8 @@ struct fsl_gpio_soc_data {
 	/* SoCs has a Port Data Direction Register (PDDR) */
 	bool have_paddr;
 	bool have_dual_base;
+	bool have_clk;
+	bool has_port_clk;
 };
 
 struct vf610_gpio_port {
@@ -69,10 +71,13 @@ static const struct fsl_gpio_soc_data vf610_data = {
 static const struct fsl_gpio_soc_data imx_data = {
 	.have_paddr = true,
 	.have_dual_base = true,
+	.have_clk = true,
+	.has_port_clk = true,
 };
 
 static const struct fsl_gpio_soc_data imx8ulp_data = {
 	.have_paddr = true,
+	.have_clk = true,
 };
 
 static const struct of_device_id vf610_gpio_dt_ids[] = {
@@ -202,6 +207,23 @@ static const struct irq_chip vf610_irqchip = {
 	GPIOCHIP_IRQ_RESOURCE_HELPERS,
 };
 
+static int vf610_gpio_enable_clk(struct device *dev, const char *name,
+				 bool required)
+{
+	struct clk *clk;
+
+	if (required)
+		clk = devm_clk_get_enabled(dev, name);
+	else
+		clk = devm_clk_get_optional_enabled(dev, name);
+
+	if (IS_ERR(clk))
+		return dev_err_probe(dev, PTR_ERR(clk),
+				     "failed to get/enable %s clock\n", name);
+
+	return 0;
+}
+
 static int vf610_gpio_probe(struct platform_device *pdev)
 {
 	struct gpio_generic_chip_config config;
@@ -209,7 +231,6 @@ static int vf610_gpio_probe(struct platform_device *pdev)
 	struct vf610_gpio_port *port;
 	struct gpio_chip *gc;
 	struct gpio_irq_chip *girq;
-	struct clk *clk;
 	unsigned long flags;
 	int i;
 	int ret;
@@ -253,15 +274,15 @@ static int vf610_gpio_probe(struct platform_device *pdev)
 	if (port->irq < 0)
 		return port->irq;
 
-	clk = devm_clk_get_optional_enabled(dev, "port");
-	if (IS_ERR(clk))
-		return dev_err_probe(dev, PTR_ERR(clk),
-				     "failed to get/enable port clock\n");
+	ret = vf610_gpio_enable_clk(dev, "gpio", port->sdata->have_clk);
+	if (ret)
+		return ret;
 
-	clk = devm_clk_get_optional_enabled(dev, "gpio");
-	if (IS_ERR(clk))
-		return dev_err_probe(dev, PTR_ERR(clk),
-				     "failed to get/enable gpio clock\n");
+	if (port->sdata->has_port_clk) {
+		ret = vf610_gpio_enable_clk(dev, "port", true);
+		if (ret)
+			return ret;
+	}
 
 	gc = &port->chip.gc;
 	flags = GPIO_GENERIC_PINCTRL_BACKEND;
