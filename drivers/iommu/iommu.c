@@ -8,6 +8,7 @@
 
 #include <linux/amba/bus.h>
 #include <linux/device.h>
+#include <linux/dmaengine.h>
 #include <linux/kernel.h>
 #include <linux/bits.h>
 #include <linux/bug.h>
@@ -190,6 +191,9 @@ static const struct bus_type * const iommu_buses[] = {
 #endif
 #ifdef CONFIG_ARM_AMBA
 	&amba_bustype,
+#endif
+#ifdef CONFIG_DMA_ENGINE
+	&dma_chan_bus_type,
 #endif
 #ifdef CONFIG_FSL_MC_BUS
 	&fsl_mc_bus_type,
