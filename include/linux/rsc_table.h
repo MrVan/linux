@@ -309,6 +309,16 @@ static inline int rsc_table_for_each_entry(struct resource_table *table,
 					   void *data) {
 	int i, ret;
 
+	if (table_sz < sizeof(*table)) {
+		dev_err(dev, "rsc table header is truncated\n");
+		return -EINVAL;
+	}
+
+	if (struct_size(table, offset, table->num) > table_sz) {
+		dev_err(dev, "rsc table offsets are truncated\n");
+		return -EINVAL;
+	}
+
 	for (i = 0; i < table->num; i++) {
 		u32 offset = table->offset[i];
 		struct fw_rsc_hdr *hdr;
