@@ -221,6 +221,10 @@ static int imx8mp_dsp_reset(struct imx_dsp_rproc *priv)
 {
 	void __iomem *dap = ioremap_wc(IMX8M_DAP_DEBUG, IMX8M_DAP_DEBUG_SIZE);
 	int pwrctl;
+	int ret;
+
+	if (!dap)
+		return -ENOMEM;
 
 	/* Put DSP into reset and stall */
 	pwrctl = readl(dap + IMX8M_DAP_PWRCTL);
@@ -230,7 +234,11 @@ static int imx8mp_dsp_reset(struct imx_dsp_rproc *priv)
 	/* Keep reset asserted for 10 cycles */
 	usleep_range(1, 2);
 
-	reset_control_assert(priv->run_stall);
+	ret = reset_control_assert(priv->run_stall);
+	if (ret) {
+		iounmap(dap);
+		return ret;
+	}
 
 	/* Take the DSP out of reset and keep stalled for FW loading */
 	pwrctl = readl(dap + IMX8M_DAP_PWRCTL);
