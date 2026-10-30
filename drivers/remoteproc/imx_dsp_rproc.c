@@ -464,10 +464,13 @@ static int imx_dsp_rproc_sys_to_da(struct imx_dsp_rproc *priv, u64 sys,
 	/* Parse address translation table */
 	for (i = 0; i < dcfg->att_size; i++) {
 		const struct imx_rproc_att *att = &dcfg->att[i];
+		u64 offset;
 
-		if (sys >= att->sa && sys + len <= att->sa + att->size) {
-			unsigned int offset = sys - att->sa;
+		if (sys < att->sa)
+			continue;
 
+		offset = sys - att->sa;
+		if (offset <= att->size && len <= att->size - offset) {
 			*da = att->da + offset;
 			return 0;
 		}
