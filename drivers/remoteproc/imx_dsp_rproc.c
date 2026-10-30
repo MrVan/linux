@@ -385,8 +385,12 @@ static int imx_dsp_rproc_start(struct rproc *rproc)
 		return ret;
 	}
 
-	if (priv->flags & WAIT_FW_CONFIRMATION)
-		return imx_dsp_rproc_ready(rproc);
+	if (priv->flags & WAIT_FW_CONFIRMATION) {
+		ret = imx_dsp_rproc_ready(rproc);
+		if (ret && dcfg->ops->stop)
+			dcfg->ops->stop(rproc);
+		return ret;
+	}
 
 	return 0;
 }
