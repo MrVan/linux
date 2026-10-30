@@ -822,6 +822,7 @@ static int rproc_handle_carveout(struct rproc *rproc,
 	struct fw_rsc_carveout *rsc = ptr;
 	struct rproc_mem_entry *carveout;
 	struct device *dev = &rproc->dev;
+	char name[sizeof(rsc->name) + 1];
 
 	if (sizeof(*rsc) > avail) {
 		dev_err(dev, "carveout rsc is truncated\n");
@@ -834,14 +835,18 @@ static int rproc_handle_carveout(struct rproc *rproc,
 		return -EINVAL;
 	}
 
-	dev_dbg(dev, "carveout rsc: name: %s, da 0x%x, pa 0x%x, len 0x%x, flags 0x%x\n",
-		rsc->name, rsc->da, rsc->pa, rsc->len, rsc->flags);
+	memcpy(name, rsc->name, sizeof(rsc->name));
+	name[sizeof(rsc->name)] = '\0';
+
+	dev_dbg(dev, "carveout rsc: name: %.*s, da 0x%x, pa 0x%x, len 0x%x, flags 0x%x\n",
+		(int)sizeof(rsc->name), (const char *)rsc->name,
+		rsc->da, rsc->pa, rsc->len, rsc->flags);
 
 	/*
 	 * Check carveout rsc already part of a registered carveout,
 	 * Search by name, then check the da and length
 	 */
-	carveout = rproc_find_carveout_by_name(rproc, rsc->name);
+	carveout = rproc_find_carveout_by_name(rproc, "%s", name);
 
 	if (carveout) {
 		if (carveout->rsc_offset != FW_RSC_ADDR_ANY) {
@@ -863,7 +868,7 @@ static int rproc_handle_carveout(struct rproc *rproc,
 	/* Register carveout in list */
 	carveout = rproc_mem_entry_init(dev, NULL, 0, rsc->len, rsc->da,
 					rproc_alloc_carveout,
-					rproc_release_carveout, rsc->name);
+					rproc_release_carveout, "%s", name);
 	if (!carveout) {
 		dev_err(dev, "Can't allocate memory entry structure\n");
 		return -ENOMEM;
