@@ -139,8 +139,12 @@ struct imx_dsp_rproc {
 	struct imx_sc_ipc			*ipc_handle;
 	struct work_struct			rproc_work;
 	struct completion			pm_comp;
+	struct completion			fw_load;
+	atomic_t				fw_loading;
 	u32					flags;
 };
+
+static void imx_dsp_rproc_wait_fw(void *data);
 
 /**
  * struct imx_dsp_rproc_dcfg - DSP remote processor configuration
@@ -1168,6 +1172,8 @@ static int imx_dsp_rproc_probe(struct platform_device *pdev)
 		return dev_err_probe(dev, ret, "failed on imx_dsp_rproc_clk_get\n");
 
 	init_completion(&priv->pm_comp);
+	init_completion(&priv->fw_load);
+	atomic_set(&priv->fw_loading, 0);
 	rproc->auto_boot = false;
 	ret = devm_rproc_add(dev, rproc);
 	if (ret)
@@ -1175,7 +1181,11 @@ static int imx_dsp_rproc_probe(struct platform_device *pdev)
 
 	rproc_coredump_set_elf_info(rproc, ELFCLASS32, EM_XTENSA);
 
-	return devm_pm_runtime_enable(dev);
+	ret = devm_pm_runtime_enable(dev);
+	if (ret)
+		return ret;
+
+	return devm_add_action_or_reset(dev, imx_dsp_rproc_wait_fw, priv);
 }
 
 /* pm runtime functions */
@@ -1218,10 +1228,24 @@ static int imx_dsp_runtime_suspend(struct device *dev)
 	return 0;
 }
 
+static void imx_dsp_rproc_wait_fw(void *data)
+{
+	struct imx_dsp_rproc *priv = data;
+
+	if (atomic_read(&priv->fw_loading))
+		wait_for_completion(&priv->fw_load);
+}
+
 static void imx_dsp_load_firmware(const struct firmware *fw, void *context)
 {
 	struct rproc *rproc = context;
+	struct imx_dsp_rproc *priv = rproc->priv;
 	int ret;
+
+	if (!fw) {
+		dev_err(rproc->dev.parent, "failed to load firmware\n");
+		goto complete;
+	}
 
 	/*
 	 * Same flow as start procedure.
@@ -1240,6 +1264,9 @@ static void imx_dsp_load_firmware(const struct firmware *fw, void *context)
 
 out:
 	release_firmware(fw);
+complete:
+	atomic_set(&priv->fw_loading, 0);
+	complete(&priv->fw_load);
 }
 
 static int imx_dsp_suspend(struct device *dev)
@@ -1248,6 +1275,8 @@ static int imx_dsp_suspend(struct device *dev)
 	struct imx_dsp_rproc *priv = rproc->priv;
 	__u32 mmsg = RP_MBOX_SUSPEND_SYSTEM;
 	int ret;
+
+	imx_dsp_rproc_wait_fw(priv);
 
 	if (rproc->state != RPROC_RUNNING)
 		goto out;
@@ -1295,6 +1324,7 @@ out:
 static int imx_dsp_resume(struct device *dev)
 {
 	struct rproc *rproc = dev_get_drvdata(dev);
+	struct imx_dsp_rproc *priv = rproc->priv;
 	int ret = 0;
 
 	ret = pm_runtime_force_resume(dev);
@@ -1309,10 +1339,15 @@ static int imx_dsp_resume(struct device *dev)
 	 * is reset, the image segments are lost. So need to reload
 	 * firmware and restart the DSP if it is in running state.
 	 */
+	imx_dsp_rproc_wait_fw(priv);
+	reinit_completion(&priv->fw_load);
+	atomic_set(&priv->fw_loading, 1);
 	ret = request_firmware_nowait(THIS_MODULE, FW_ACTION_UEVENT,
 				      rproc->firmware, dev, GFP_KERNEL,
 				      rproc, imx_dsp_load_firmware);
 	if (ret < 0) {
+		atomic_set(&priv->fw_loading, 0);
+		complete(&priv->fw_load);
 		dev_err(dev, "load firmware failed: %d\n", ret);
 		goto err;
 	}
