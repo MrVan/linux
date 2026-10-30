@@ -295,7 +295,7 @@ static int arm_vsmmu_vsid_to_sid(struct arm_vsmmu *vsmmu, u32 vsid, u32 *sid)
 
 	/* At this moment, iommufd only supports PCI device that has one SID */
 	if (sid)
-		*sid = master->streams[0].id;
+		*sid = master->streams[0]->id;
 unlock:
 	xa_unlock(&vsmmu->core.vdevs);
 	return ret;
