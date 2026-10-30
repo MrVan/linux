@@ -23,6 +23,26 @@ config REMOTEPROC_CDEV
 
 	  It's safe to say N if you don't want to use this interface.
 
+config RPROC_KUNIT_TEST
+	bool "KUnit tests for the remoteproc core" if !KUNIT_ALL_TESTS
+	depends on KUNIT
+	default KUNIT_ALL_TESTS
+	help
+	  This builds KUnit tests for the remoteproc ELF loader, resource
+	  table parsing, vring validation, and device address translation.
+	  The suite is intended to run under KUnit on a virtualized or real
+	  target and does not require remoteproc hardware.
+
+config IMX_DSP_RPROC_KUNIT_TEST
+	bool "KUnit tests for i.MX DSP remoteproc" if !KUNIT_ALL_TESTS
+	depends on KUNIT && IMX_DSP_REMOTEPROC && OF_OVERLAY
+	default KUNIT_ALL_TESTS
+	help
+	  This builds a KUnit test that applies a test-only DT overlay for the
+	  i.MX DSP remoteproc driver. It verifies probe and removal of the
+	  platform device without requiring a DSP or firmware image. The test
+	  uses a dummy syscon node and does not touch real hardware.
+
 config AMD_MBV_BRAM_REMOTEPROC
 	tristate "AMD MicroBlaze/V BRAM-based remoteproc support"
 	depends on OF && COMMON_CLK && (GPIOLIB || COMPILE_TEST)

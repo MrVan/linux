@@ -1,0 +1,25 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target-path = "/";
+
+		__overlay__ {
+			#address-cells = <2>;
+			#size-cells = <2>;
+
+			rproc_kunit_syscon: syscon@10000000 {
+				compatible = "syscon";
+				reg = <0x0 0x10000000 0x0 0x1000>;
+			};
+
+			rproc_kunit_dsp: dsp@10001000 {
+				compatible = "fsl,imx8ulp-hifi4";
+				reg = <0x0 0x10001000 0x0 0x1000>;
+				firmware-name = "rproc-kunit-fw";
+				fsl,dsp-ctrl = <&rproc_kunit_syscon>;
+			};
+		};
+	};
+};
