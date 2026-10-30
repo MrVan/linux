@@ -118,6 +118,7 @@ struct imx_rproc {
 	struct work_struct		rproc_work;
 	struct workqueue_struct		*workqueue;
 	void __iomem			*rsc_table;
+	size_t				rsc_table_sz;
 	struct imx_sc_ipc		*ipc_handle;
 	struct notifier_block		rproc_nb;
 	u32				rproc_pt;	/* partition id */
@@ -690,8 +691,23 @@ static int imx_rproc_prepare(struct rproc *rproc)
 
 static int imx_rproc_parse_fw(struct rproc *rproc, const struct firmware *fw)
 {
-	rproc_elf_load_rsc_table_optional(rproc, fw, dev_info,
-					  "No resource table in elf\n");
+	struct imx_rproc *priv = rproc->priv;
+	int ret;
+
+	ret = rproc_elf_load_rsc_table(rproc, fw);
+	if (ret == -EINVAL) {
+		dev_info(&rproc->dev, "No resource table in elf\n");
+		return 0;
+	}
+	if (ret)
+		return ret;
+
+	if (priv->rsc_table && rproc->table_sz > priv->rsc_table_sz) {
+		dev_err(priv->dev, "resource table size %zu exceeds rsc-table region %zu\n",
+			rproc->table_sz, priv->rsc_table_sz);
+		return -EINVAL;
+	}
+
 	return 0;
 }
 
@@ -753,7 +769,7 @@ static struct resource_table *imx_rproc_get_loaded_rsc_table(struct rproc *rproc
 	if (!priv->rsc_table)
 		return NULL;
 
-	*table_sz = SZ_1K;
+	*table_sz = priv->rsc_table_sz;
 	return (struct resource_table *)priv->rsc_table;
 }
 
@@ -851,8 +867,10 @@ static int imx_rproc_addr_init(struct imx_rproc *priv,
 		}
 		priv->mem[b].sys_addr = res.start;
 		priv->mem[b].size = resource_size(&res);
-		if (strstarts(res.name, "rsc-table"))
+		if (strstarts(res.name, "rsc-table")) {
 			priv->rsc_table = priv->mem[b].cpu_addr;
+			priv->rsc_table_sz = resource_size(&res);
+		}
 		b++;
 	}
 
