@@ -215,7 +215,8 @@ static void arm_smmu_test_make_cdtable_ste(struct arm_smmu_ste *ste,
 		.stall_enabled = stall_enabled,
 	};
 
-	arm_smmu_make_cdtable_ste(ste, &master, ats_enabled, s1dss);
+	arm_smmu_make_cdtable_ste(ste, &master, &master.cd_table, ats_enabled,
+				  s1dss);
 	if (feat & ARM_SMMU_MASTER_TEST_NESTED) {
 		struct arm_smmu_ste s2ste;
 		int i;
