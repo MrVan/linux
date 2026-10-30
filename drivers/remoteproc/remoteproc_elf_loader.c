@@ -220,9 +220,9 @@ int rproc_elf_load_segments(struct rproc *rproc, const struct firmware *fw)
 			break;
 		}
 
-		if (offset + filesz > fw->size) {
-			dev_err(dev, "truncated fw: need 0x%llx avail 0x%zx\n",
-				offset + filesz, fw->size);
+		if (offset > fw->size || filesz > fw->size - offset) {
+			dev_err(dev, "truncated fw: offset 0x%llx filesz 0x%llx avail 0x%zx\n",
+				offset, filesz, fw->size);
 			ret = -EINVAL;
 			break;
 		}
