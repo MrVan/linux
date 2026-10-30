@@ -1051,7 +1051,7 @@ struct arm_smmu_event {
 struct arm_smmu_master {
 	struct arm_smmu_device		*smmu;
 	struct device			*dev;
-	struct arm_smmu_stream		*streams;
+	struct arm_smmu_stream		**streams;
 	/*
 	 * Scratch memory for a to_merge or to_unref array to build a per-domain
 	 * invalidation array. It'll be pre-allocated with enough enries for all
