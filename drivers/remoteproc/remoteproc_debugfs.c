@@ -276,25 +276,51 @@ static int rproc_rsc_table_show(struct seq_file *seq, void *p)
 {
 	static const char * const types[] = {"carveout", "devmem", "trace", "vdev"};
 	struct rproc *rproc = seq->private;
-	struct resource_table *table = rproc->table_ptr;
+	struct resource_table *table;
 	struct fw_rsc_carveout *c;
 	struct fw_rsc_devmem *d;
 	struct fw_rsc_trace *t;
 	struct fw_rsc_vdev *v;
+	size_t table_sz;
 	int i, j;
 
+	mutex_lock(&rproc->lock);
+	table = rproc->table_ptr;
+	table_sz = rproc->table_sz;
+
 	if (!table) {
+		mutex_unlock(&rproc->lock);
 		seq_puts(seq, "No resource table found\n");
 		return 0;
 	}
 
+	if (table_sz < sizeof(*table) ||
+	    struct_size(table, offset, table->num) > table_sz) {
+		mutex_unlock(&rproc->lock);
+		seq_puts(seq, "Malformed resource table\n");
+		return 0;
+	}
+
 	for (i = 0; i < table->num; i++) {
-		int offset = table->offset[i];
-		struct fw_rsc_hdr *hdr = (void *)table + offset;
-		void *rsc = (void *)hdr + sizeof(*hdr);
+		u32 offset = table->offset[i];
+		struct fw_rsc_hdr *hdr;
+		size_t avail;
+		void *rsc;
+
+		if (offset < sizeof(*table) || offset >= table_sz ||
+		    table_sz - offset < sizeof(*hdr)) {
+			seq_puts(seq, "Malformed resource table\n");
+			break;
+		}
+
+		hdr = (void *)table + offset;
+		avail = table_sz - offset - sizeof(*hdr);
+		rsc = (void *)hdr + sizeof(*hdr);
 
 		switch (hdr->type) {
 		case RSC_CARVEOUT:
+			if (avail < sizeof(*c))
+				goto truncated;
 			c = rsc;
 			seq_printf(seq, "Entry %d is of type %s\n", i, types[hdr->type]);
 			seq_printf(seq, "  Device Address 0x%x\n", c->da);
@@ -302,9 +328,12 @@ static int rproc_rsc_table_show(struct seq_file *seq, void *p)
 			seq_printf(seq, "  Length 0x%x Bytes\n", c->len);
 			seq_printf(seq, "  Flags 0x%x\n", c->flags);
 			seq_printf(seq, "  Reserved (should be zero) [%d]\n", c->reserved);
-			seq_printf(seq, "  Name %s\n\n", c->name);
+			seq_printf(seq, "  Name %.*s\n\n", (int)sizeof(c->name),
+				   (const char *)c->name);
 			break;
 		case RSC_DEVMEM:
+			if (avail < sizeof(*d))
+				goto truncated;
 			d = rsc;
 			seq_printf(seq, "Entry %d is of type %s\n", i, types[hdr->type]);
 			seq_printf(seq, "  Device Address 0x%x\n", d->da);
@@ -312,17 +341,23 @@ static int rproc_rsc_table_show(struct seq_file *seq, void *p)
 			seq_printf(seq, "  Length 0x%x Bytes\n", d->len);
 			seq_printf(seq, "  Flags 0x%x\n", d->flags);
 			seq_printf(seq, "  Reserved (should be zero) [%d]\n", d->reserved);
-			seq_printf(seq, "  Name %s\n\n", d->name);
+			seq_printf(seq, "  Name %.*s\n\n", (int)sizeof(d->name),
+				   (const char *)d->name);
 			break;
 		case RSC_TRACE:
+			if (avail < sizeof(*t))
+				goto truncated;
 			t = rsc;
 			seq_printf(seq, "Entry %d is of type %s\n", i, types[hdr->type]);
 			seq_printf(seq, "  Device Address 0x%x\n", t->da);
 			seq_printf(seq, "  Length 0x%x Bytes\n", t->len);
 			seq_printf(seq, "  Reserved (should be zero) [%d]\n", t->reserved);
-			seq_printf(seq, "  Name %s\n\n", t->name);
+			seq_printf(seq, "  Name %.*s\n\n", (int)sizeof(t->name),
+				   (const char *)t->name);
 			break;
 		case RSC_VDEV:
+			if (avail < sizeof(*v))
+				goto truncated;
 			v = rsc;
 			seq_printf(seq, "Entry %d is of type %s\n", i, types[hdr->type]);
 
@@ -335,6 +370,11 @@ static int rproc_rsc_table_show(struct seq_file *seq, void *p)
 			seq_printf(seq, "  Number of vrings %d\n", v->num_of_vrings);
 			seq_printf(seq, "  Reserved (should be zero) [%d][%d]\n\n",
 				   v->reserved[0], v->reserved[1]);
+
+			if (struct_size(v, vring, v->num_of_vrings) > avail) {
+				seq_puts(seq, "  Vring array is truncated\n");
+				goto out;
+			}
 
 			for (j = 0; j < v->num_of_vrings; j++) {
 				seq_printf(seq, "  Vring %d\n", j);
@@ -351,8 +391,14 @@ static int rproc_rsc_table_show(struct seq_file *seq, void *p)
 				   hdr->type, hdr);
 			break;
 		}
+		continue;
+truncated:
+		seq_printf(seq, "Entry %d is truncated\n", i);
+		break;
 	}
 
+out:
+	mutex_unlock(&rproc->lock);
 	return 0;
 }
 
@@ -364,6 +410,7 @@ static int rproc_carveouts_show(struct seq_file *seq, void *p)
 	struct rproc *rproc = seq->private;
 	struct rproc_mem_entry *carveout;
 
+	mutex_lock(&rproc->lock);
 	list_for_each_entry(carveout, &rproc->carveouts, node) {
 		seq_puts(seq, "Carveout memory entry:\n");
 		seq_printf(seq, "\tName: %s\n", carveout->name);
@@ -372,6 +419,7 @@ static int rproc_carveouts_show(struct seq_file *seq, void *p)
 		seq_printf(seq, "\tDevice address: 0x%x\n", carveout->da);
 		seq_printf(seq, "\tLength: 0x%zx Bytes\n\n", carveout->len);
 	}
+	mutex_unlock(&rproc->lock);
 
 	return 0;
 }
