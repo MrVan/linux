@@ -2076,8 +2076,8 @@ static int arm_smmu_streams_cmp_node(struct rb_node *lhs,
 		&rb_entry(lhs, struct arm_smmu_stream, node)->id, rhs);
 }
 
-static struct arm_smmu_master *
-arm_smmu_find_master(struct arm_smmu_device *smmu, u32 sid)
+static struct arm_smmu_stream *
+arm_smmu_find_stream(struct arm_smmu_device *smmu, u32 sid)
 {
 	struct rb_node *node;
 
@@ -2086,7 +2086,18 @@ arm_smmu_find_master(struct arm_smmu_device *smmu, u32 sid)
 	node = rb_find(&sid, &smmu->streams, arm_smmu_streams_cmp_key);
 	if (!node)
 		return NULL;
-	return rb_entry(node, struct arm_smmu_stream, node)->master;
+	return rb_entry(node, struct arm_smmu_stream, node);
+}
+
+static struct arm_smmu_master *
+arm_smmu_find_master(struct arm_smmu_device *smmu, u32 sid)
+{
+	struct arm_smmu_stream *stream;
+
+	stream = arm_smmu_find_stream(smmu, sid);
+	if (!stream)
+		return NULL;
+	return stream->master;
 }
 
 /* IRQ and event handlers */
@@ -4282,10 +4293,25 @@ static int arm_smmu_stream_id_cmp(const void *_l, const void *_r)
 	return cmp_int((*l)->id, (*r)->id);
 }
 
+static void arm_smmu_free_master_streams(struct arm_smmu_master *master)
+{
+	struct arm_smmu_device *smmu = master->smmu;
+	int i;
+
+	lockdep_assert_held(&smmu->streams_mutex);
+
+	for (i = 0; i < master->num_streams; i++) {
+		if (!master->streams[i])
+			continue;
+		rb_erase(&master->streams[i]->node, &smmu->streams);
+		kfree(master->streams[i]);
+	}
+}
+
 static int arm_smmu_insert_master(struct arm_smmu_device *smmu,
 				  struct arm_smmu_master *master)
 {
-	int i;
+	int i, n;
 	int ret = 0;
 	struct iommu_fwspec *fwspec = dev_iommu_fwspec_get(master->dev);
 	bool ats_supported = dev_is_pci(master->dev) &&
@@ -4294,7 +4320,6 @@ static int arm_smmu_insert_master(struct arm_smmu_device *smmu,
 	master->streams = kzalloc_objs(*master->streams, fwspec->num_ids);
 	if (!master->streams)
 		return -ENOMEM;
-	master->num_streams = fwspec->num_ids;
 
 	if (!ats_supported) {
 		/* Base case has 1 ASID entry or maximum 2 VMID entries */
@@ -4308,98 +4333,69 @@ static int arm_smmu_insert_master(struct arm_smmu_device *smmu,
 		return -ENOMEM;
 	}
 
-	for (i = 0; i < fwspec->num_ids; i++) {
-		struct arm_smmu_stream *new_stream;
+	mutex_lock(&smmu->streams_mutex);
+	for (i = 0, n = 0; i < fwspec->num_ids; i++) {
+		struct arm_smmu_stream *stream;
+		u32 sid = fwspec->ids[i];
 
-		new_stream = kzalloc_obj(*new_stream, GFP_KERNEL);
-		if (!new_stream) {
-			ret = -ENOMEM;
-			goto out_free_streams;
+		ret = arm_smmu_init_sid_strtab(smmu, sid);
+		if (ret)
+			break;
+
+		stream = arm_smmu_find_stream(smmu, sid);
+		if (stream) {
+			/* Bridged PCI devices may end up with duplicated IDs */
+			if (stream->master == master)
+				continue;
+
+			dev_warn(master->dev,
+				 "Aliasing StreamID 0x%x (from %s) unsupported, expect DMA to be broken\n",
+				 sid, dev_name(stream->master->dev));
+			ret = -ENODEV;
+			break;
 		}
-		new_stream->id = fwspec->ids[i];
-		new_stream->master = master;
-		master->streams[i] = new_stream;
+
+		stream = kzalloc_obj(*stream, GFP_KERNEL);
+		if (!stream) {
+			ret = -ENOMEM;
+			break;
+		}
+		stream->id = sid;
+		stream->master = master;
+
+		rb_find_add(&stream->node, &smmu->streams,
+			    arm_smmu_streams_cmp_node);
+		master->streams[n++] = stream;
 	}
+	master->num_streams = n;
+
+	if (ret) {
+		arm_smmu_free_master_streams(master);
+		mutex_unlock(&smmu->streams_mutex);
+		kfree(master->streams);
+		kfree(master->build_invs);
+		return ret;
+	}
+	mutex_unlock(&smmu->streams_mutex);
 
 	/* Put the ids into order for sorted to_merge/to_unref arrays */
 	sort(master->streams, master->num_streams,
 	     sizeof(master->streams[0]), arm_smmu_stream_id_cmp,
 	     NULL);
 
-	/*
-	 * Clear after sorting: RB_CLEAR_NODE() records the node's own address,
-	 * which sort_nonatomic() invalidates by relocating the entries.
-	 */
-	for (i = 0; i < fwspec->num_ids; i++)
-		RB_CLEAR_NODE(&master->streams[i]->node);
-
-	mutex_lock(&smmu->streams_mutex);
-	for (i = 0; i < fwspec->num_ids; i++) {
-		struct arm_smmu_stream *new_stream = master->streams[i];
-		struct rb_node *existing;
-		u32 sid = new_stream->id;
-
-		ret = arm_smmu_init_sid_strtab(smmu, sid);
-		if (ret)
-			break;
-
-		/* Insert into SID tree */
-		existing = rb_find_add(&new_stream->node, &smmu->streams,
-				       arm_smmu_streams_cmp_node);
-		if (existing) {
-			struct arm_smmu_master *existing_master =
-				rb_entry(existing, struct arm_smmu_stream, node)
-					->master;
-
-			/* Bridged PCI devices may end up with duplicated IDs */
-			if (existing_master == master)
-				continue;
-
-			dev_warn(master->dev,
-				 "Aliasing StreamID 0x%x (from %s) unsupported, expect DMA to be broken\n",
-				 sid, dev_name(existing_master->dev));
-			ret = -ENODEV;
-			break;
-		}
-	}
-
-	if (ret) {
-		for (i--; i >= 0; i--)
-			if (!RB_EMPTY_NODE(&master->streams[i]->node))
-				rb_erase(&master->streams[i]->node,
-					 &smmu->streams);
-		mutex_unlock(&smmu->streams_mutex);
-		goto out_free_streams;
-	}
-	mutex_unlock(&smmu->streams_mutex);
-
 	return 0;
-
-out_free_streams:
-	for (i = 0; i < master->num_streams; i++)
-		kfree(master->streams[i]);
-	kfree(master->streams);
-	kfree(master->build_invs);
-	return ret;
 }
 
 static void arm_smmu_remove_master(struct arm_smmu_master *master)
 {
-	int i;
 	struct arm_smmu_device *smmu = master->smmu;
-	struct iommu_fwspec *fwspec = dev_iommu_fwspec_get(master->dev);
 
 	if (!smmu || !master->streams)
 		return;
 
 	mutex_lock(&smmu->streams_mutex);
-	for (i = 0; i < fwspec->num_ids; i++)
-		if (!RB_EMPTY_NODE(&master->streams[i]->node))
-			rb_erase(&master->streams[i]->node, &smmu->streams);
+	arm_smmu_free_master_streams(master);
 	mutex_unlock(&smmu->streams_mutex);
-
-	for (i = 0; i < master->num_streams; i++)
-		kfree(master->streams[i]);
 
 	kfree(master->streams);
 	kfree(master->build_invs);
