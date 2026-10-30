@@ -14,6 +14,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/export.h>
 #include <linux/of_reserved_mem.h>
+#include <linux/overflow.h>
 #include <linux/platform_device.h>
 #include <linux/remoteproc.h>
 #include <linux/virtio.h>
@@ -310,18 +311,41 @@ static int rproc_virtio_finalize_features(struct virtio_device *vdev)
 	return 0;
 }
 
+static void *rproc_vdev_config(struct rproc_vdev *rvdev, unsigned int offset,
+			       unsigned int len)
+{
+	struct rproc *rproc = rvdev->rproc;
+	struct fw_rsc_vdev *rsc;
+	size_t vring_sz, config_off, config_len;
+
+	if (!rproc->table_ptr || rvdev->rsc_offset > rproc->table_sz)
+		return NULL;
+
+	rsc = (void *)rproc->table_ptr + rvdev->rsc_offset;
+	vring_sz = struct_size(rsc, vring, rvdev->num_of_vrings);
+	if (vring_sz > rproc->table_sz - rvdev->rsc_offset)
+		return NULL;
+
+	config_off = rvdev->rsc_offset + vring_sz;
+	config_len = rsc->config_len;
+	if (config_len > rproc->table_sz - config_off)
+		return NULL;
+
+	if (offset > config_len || len > config_len - offset)
+		return NULL;
+
+	return (void *)rsc + vring_sz;
+}
+
 static void rproc_virtio_get(struct virtio_device *vdev, unsigned int offset,
 			     void *buf, unsigned int len)
 {
 	struct rproc_vdev *rvdev = vdev_to_rvdev(vdev);
-	struct fw_rsc_vdev *rsc;
 	void *cfg;
 
-	rsc = (void *)rvdev->rproc->table_ptr + rvdev->rsc_offset;
-	cfg = &rsc->vring[rsc->num_of_vrings];
-
-	if (offset + len > rsc->config_len || offset + len < len) {
-		dev_err(&vdev->dev, "rproc_virtio_get: access out of bounds\n");
+	cfg = rproc_vdev_config(rvdev, offset, len);
+	if (!cfg) {
+		dev_err(&vdev->dev, "%s: access out of bounds\n", __func__);
 		return;
 	}
 
@@ -332,14 +356,11 @@ static void rproc_virtio_set(struct virtio_device *vdev, unsigned int offset,
 			     const void *buf, unsigned int len)
 {
 	struct rproc_vdev *rvdev = vdev_to_rvdev(vdev);
-	struct fw_rsc_vdev *rsc;
 	void *cfg;
 
-	rsc = (void *)rvdev->rproc->table_ptr + rvdev->rsc_offset;
-	cfg = &rsc->vring[rsc->num_of_vrings];
-
-	if (offset + len > rsc->config_len || offset + len < len) {
-		dev_err(&vdev->dev, "rproc_virtio_set: access out of bounds\n");
+	cfg = rproc_vdev_config(rvdev, offset, len);
+	if (!cfg) {
+		dev_err(&vdev->dev, "%s: access out of bounds\n", __func__);
 		return;
 	}
 
