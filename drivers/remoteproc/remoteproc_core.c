@@ -396,6 +396,12 @@ rproc_parse_vring(struct rproc_vdev *rvdev, struct fw_rsc_vdev *rsc, int i)
 		return -EINVAL;
 	}
 
+	if (!is_power_of_2(vring->num) || !is_power_of_2(vring->align)) {
+		dev_err(dev, "qsz (%d) or alignment (%d) is not a power of two\n",
+			vring->num, vring->align);
+		return -EINVAL;
+	}
+
 	rvring->num = vring->num;
 	rvring->align = vring->align;
 	rvring->rvdev = rvdev;
