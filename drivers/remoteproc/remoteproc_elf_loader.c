@@ -44,10 +44,11 @@ int rproc_elf_sanity_check(struct rproc *rproc, const struct firmware *fw)
 	 * elf32.
 	 */
 	struct elf32_hdr *ehdr;
-	u32 elf_shdr_get_size;
+	u32 elf_shdr_get_size, elf_phdr_get_size;
 	u64 phoff, shoff;
+	size_t phend, shend;
 	char class;
-	u16 phnum;
+	u16 phnum, shnum, shstrndx;
 
 	if (!fw) {
 		dev_err(dev, "failed to load %s\n", name);
@@ -90,9 +91,28 @@ int rproc_elf_sanity_check(struct rproc *rproc, const struct firmware *fw)
 	phoff = elf_hdr_get_e_phoff(class, fw->data);
 	shoff = elf_hdr_get_e_shoff(class, fw->data);
 	phnum =  elf_hdr_get_e_phnum(class, fw->data);
+	shnum = elf_hdr_get_e_shnum(class, fw->data);
+	shstrndx = elf_hdr_get_e_shstrndx(class, fw->data);
 	elf_shdr_get_size = elf_size_of_shdr(class);
+	elf_phdr_get_size = elf_size_of_phdr(class);
 
-	if (fw->size < shoff + elf_shdr_get_size) {
+	/* keeps shoff in size_t range for the two bounds below */
+	if (shoff > fw->size) {
+		dev_err(dev, "Section header table is out of bounds\n");
+		return -EINVAL;
+	}
+
+	if (shnum) {
+		shend = size_add(size_mul(elf_shdr_get_size, shnum), shoff);
+		if (shend > fw->size) {
+			dev_err(dev, "Section headers are out of bounds\n");
+			return -EINVAL;
+		}
+	}
+
+	/* find_table() reads the header at shstrndx even with no sections */
+	shend = size_add(size_mul(elf_shdr_get_size, (size_t)shstrndx + 1), shoff);
+	if (shend > fw->size) {
 		dev_err(dev, "Image is too small\n");
 		return -EINVAL;
 	}
@@ -104,6 +124,12 @@ int rproc_elf_sanity_check(struct rproc *rproc, const struct firmware *fw)
 
 	if (phoff > fw->size) {
 		dev_err(dev, "Firmware size is too small\n");
+		return -EINVAL;
+	}
+
+	phend = size_add(size_mul(elf_phdr_get_size, phnum), phoff);
+	if (phend > fw->size) {
+		dev_err(dev, "Program headers are out of bounds\n");
 		return -EINVAL;
 	}
 
@@ -258,6 +284,12 @@ find_table(struct device *dev, const struct firmware *fw)
 	u16 shnum = elf_hdr_get_e_shnum(class, ehdr);
 	u32 elf_shdr_get_size = elf_size_of_shdr(class);
 	u16 shstrndx = elf_hdr_get_e_shstrndx(class, ehdr);
+	u64 name_table_offset, name_table_size;
+
+	if (shstrndx >= shnum) {
+		dev_err(dev, "Invalid string table index\n");
+		return NULL;
+	}
 
 	/* look for the resource table and handle it */
 	/* First, get the section header according to the elf class */
@@ -265,12 +297,27 @@ find_table(struct device *dev, const struct firmware *fw)
 	/* Compute name table section header entry in shdr array */
 	name_table_shdr = shdr + (shstrndx * elf_shdr_get_size);
 	/* Finally, compute the name table section address in elf */
-	name_table = elf_data + elf_shdr_get_sh_offset(class, name_table_shdr);
+	name_table_offset = elf_shdr_get_sh_offset(class, name_table_shdr);
+	name_table_size = elf_shdr_get_sh_size(class, name_table_shdr);
+
+	if (name_table_offset > fw_size ||
+	    name_table_size > fw_size - name_table_offset) {
+		dev_err(dev, "String table is out of bounds\n");
+		return NULL;
+	}
+
+	name_table = elf_data + name_table_offset;
 
 	for (i = 0; i < shnum; i++, shdr += elf_shdr_get_size) {
 		u64 size = elf_shdr_get_sh_size(class, shdr);
 		u64 offset = elf_shdr_get_sh_offset(class, shdr);
 		u32 name = elf_shdr_get_sh_name(class, shdr);
+
+		if (name >= name_table_size)
+			continue;
+
+		if (!memchr(name_table + name, '\0', name_table_size - name))
+			continue;
 
 		if (strcmp(name_table + name, ".resource_table"))
 			continue;
