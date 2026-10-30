@@ -1143,8 +1143,9 @@ void arm_smmu_get_cd_used(const __le64 *ent, __le64 *used_bits);
 void arm_smmu_make_bypass_ste(struct arm_smmu_device *smmu,
 			      struct arm_smmu_ste *target);
 void arm_smmu_make_cdtable_ste(struct arm_smmu_ste *target,
-			       struct arm_smmu_master *master, bool ats_enabled,
-			       unsigned int s1dss);
+			       struct arm_smmu_master *master,
+			       struct arm_smmu_ctx_desc_cfg *cd_table,
+			       bool ats_enabled, unsigned int s1dss);
 void arm_smmu_make_sva_cd(struct arm_smmu_cd *target,
 			  struct arm_smmu_master *master, struct mm_struct *mm,
 			  u16 asid);
@@ -1193,7 +1194,7 @@ static inline void arm_smmu_domain_free(struct arm_smmu_domain *smmu_domain)
 }
 
 void arm_smmu_clear_cd(struct arm_smmu_master *master, ioasid_t ssid);
-struct arm_smmu_cd *arm_smmu_get_cd_ptr(struct arm_smmu_master *master,
+struct arm_smmu_cd *arm_smmu_master_get_cd_ptr(struct arm_smmu_master *master,
 					u32 ssid);
 void arm_smmu_make_s1_cd(struct arm_smmu_cd *target,
 			 struct arm_smmu_master *master,
