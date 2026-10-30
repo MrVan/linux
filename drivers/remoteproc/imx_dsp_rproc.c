@@ -589,6 +589,7 @@ static int imx_dsp_rproc_mbox_alloc(struct imx_dsp_rproc *priv)
 	priv->tx_ch = mbox_request_channel_byname(cl, "tx");
 	if (IS_ERR(priv->tx_ch)) {
 		ret = PTR_ERR(priv->tx_ch);
+		priv->tx_ch = NULL;
 		dev_dbg(cl->dev, "failed to request tx mailbox channel: %d\n",
 			ret);
 		return ret;
@@ -598,6 +599,7 @@ static int imx_dsp_rproc_mbox_alloc(struct imx_dsp_rproc *priv)
 	priv->rx_ch = mbox_request_channel_byname(cl, "rx");
 	if (IS_ERR(priv->rx_ch)) {
 		ret = PTR_ERR(priv->rx_ch);
+		priv->rx_ch = NULL;
 		dev_dbg(cl->dev, "failed to request rx mailbox channel: %d\n",
 			ret);
 		goto free_channel_tx;
@@ -614,6 +616,7 @@ static int imx_dsp_rproc_mbox_alloc(struct imx_dsp_rproc *priv)
 	priv->rxdb_ch = mbox_request_channel_byname(cl, "rxdb");
 	if (IS_ERR(priv->rxdb_ch)) {
 		ret = PTR_ERR(priv->rxdb_ch);
+		priv->rxdb_ch = NULL;
 		dev_dbg(cl->dev, "failed to request mbox chan rxdb, ret %d\n",
 			ret);
 		goto free_channel_rx;
@@ -623,8 +626,10 @@ static int imx_dsp_rproc_mbox_alloc(struct imx_dsp_rproc *priv)
 
 free_channel_rx:
 	mbox_free_channel(priv->rx_ch);
+	priv->rx_ch = NULL;
 free_channel_tx:
 	mbox_free_channel(priv->tx_ch);
+	priv->tx_ch = NULL;
 	return ret;
 }
 
@@ -643,8 +648,11 @@ static int imx_dsp_rproc_mbox_no_alloc(struct imx_dsp_rproc *priv)
 static void imx_dsp_rproc_free_mbox(struct imx_dsp_rproc *priv)
 {
 	mbox_free_channel(priv->tx_ch);
+	priv->tx_ch = NULL;
 	mbox_free_channel(priv->rx_ch);
+	priv->rx_ch = NULL;
 	mbox_free_channel(priv->rxdb_ch);
+	priv->rxdb_ch = NULL;
 }
 
 /**
