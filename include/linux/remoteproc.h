@@ -356,6 +356,7 @@ struct rproc_vring {
  * @vring: the vrings for this vdev
  * @rsc_offset: offset of the vdev's resource entry
  * @index: vdev position versus other vdev declared in resource table
+ * @num_of_vrings: number of vrings in use for this vdev
  */
 struct rproc_vdev {
 	struct rproc_subdev subdev;
@@ -367,6 +368,7 @@ struct rproc_vdev {
 	struct rproc_vring vring[RVDEV_NUM_VRINGS];
 	u32 rsc_offset;
 	u32 index;
+	unsigned int num_of_vrings;
 };
 
 struct rproc *rproc_get_by_phandle(phandle phandle);

@@ -521,7 +521,7 @@ static int rproc_virtio_probe(struct platform_device *pdev)
 	struct rproc_vdev *rvdev;
 	struct rproc *rproc = container_of(dev->parent, struct rproc, dev);
 	struct fw_rsc_vdev *rsc;
-	int i, ret;
+	int i, ret, num_vrings;
 
 	if (!rvdev_data)
 		return -EINVAL;
@@ -552,8 +552,15 @@ static int rproc_virtio_probe(struct platform_device *pdev)
 
 	rsc = rvdev_data->rsc;
 
+	if (rsc->num_of_vrings > ARRAY_SIZE(rvdev->vring)) {
+		dev_err(dev, "too many vrings: %d\n", rsc->num_of_vrings);
+		return -EINVAL;
+	}
+	num_vrings = rsc->num_of_vrings;
+	rvdev->num_of_vrings = num_vrings;
+
 	/* parse the vrings */
-	for (i = 0; i < rsc->num_of_vrings; i++) {
+	for (i = 0; i < num_vrings; i++) {
 		ret = rproc_parse_vring(rvdev, rsc, i);
 		if (ret)
 			return ret;
@@ -563,7 +570,7 @@ static int rproc_virtio_probe(struct platform_device *pdev)
 	rvdev->rsc_offset = rvdev_data->rsc_offset;
 
 	/* allocate the vring resources */
-	for (i = 0; i < rsc->num_of_vrings; i++) {
+	for (i = 0; i < num_vrings; i++) {
 		ret = rproc_alloc_vring(rvdev, i);
 		if (ret)
 			goto unwind_vring_allocations;
@@ -600,9 +607,9 @@ static void rproc_virtio_remove(struct platform_device *pdev)
 	struct rproc_vdev *rvdev = dev_get_drvdata(&pdev->dev);
 	struct rproc *rproc = rvdev->rproc;
 	struct rproc_vring *rvring;
-	int id;
+	unsigned int id;
 
-	for (id = 0; id < ARRAY_SIZE(rvdev->vring); id++) {
+	for (id = 0; id < rvdev->num_of_vrings; id++) {
 		rvring = &rvdev->vring[id];
 		rproc_free_vring(rvring);
 	}
