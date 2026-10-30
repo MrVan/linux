@@ -879,6 +879,7 @@ struct arm_smmu_ctx_desc_cfg {
 	};
 	dma_addr_t			cdtab_dma;
 	unsigned int			used_ssids;
+	/* The STE is S1 translate; it may point at a domain or private table */
 	u8				in_ste;
 	u8				s1fmt;
 	/* log2 of the maximum number of CDs supported by this table */
@@ -1090,6 +1091,13 @@ struct arm_smmu_domain {
 		struct arm_smmu_ctx_desc	cd;
 		struct arm_smmu_s2_cfg		s2_cfg;
 	};
+
+	/*
+	 * CD table shared by all non-PASID devices attached to this S1
+	 * domain. A master uses a private table only when it needs
+	 * substreams (PASID) or ATS-always-on/S1DSS.
+	 */
+	struct arm_smmu_ctx_desc_cfg	cd_table;
 
 	struct iommu_domain		domain;
 
