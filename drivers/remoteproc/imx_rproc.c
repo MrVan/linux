@@ -666,6 +666,12 @@ static int imx_rproc_prepare(struct rproc *rproc)
 		if (strstarts(res.name, "rsc-table"))
 			continue;
 
+		if (res.start > U32_MAX) {
+			dev_err(priv->dev, "reserved memory %s is above 32-bit address space\n",
+				res.name);
+			return -EINVAL;
+		}
+
 		/* No need to translate pa to da, i.MX use same map */
 		da = res.start;
 
@@ -679,7 +685,10 @@ static int imx_rproc_prepare(struct rproc *rproc)
 		if (!mem)
 			return -ENOMEM;
 
-		rproc_coredump_add_segment(rproc, da, resource_size(&res));
+		err = rproc_coredump_add_segment(rproc, da, resource_size(&res));
+		if (err)
+			dev_warn(priv->dev, "failed to add coredump segment: %d\n",
+				 err);
 		rproc_add_carveout(rproc, mem);
 	}
 
@@ -1370,8 +1379,10 @@ static int imx_rproc_probe(struct platform_device *pdev)
 
 	pm_runtime_enable(dev);
 	ret = pm_runtime_resume_and_get(dev);
-	if (ret)
+	if (ret) {
+		pm_runtime_disable(dev);
 		return dev_err_probe(dev, ret, "pm_runtime get failed\n");
+	}
 
 	ret = devm_rproc_add(dev, rproc);
 	if (ret) {
