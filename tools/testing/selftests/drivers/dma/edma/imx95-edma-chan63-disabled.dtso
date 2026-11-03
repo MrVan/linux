@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Disable edma2 channel 63 without masking it.
+ *
+ * Expected: fsl-edma probe fails and asks for dma-channel-mask.
+ */
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target-path = "/soc/bus@42000000/dma-controller@42000000/dma-channel@42208000";
+		__overlay__ {
+			status = "disabled";
+		};
+	};
+};

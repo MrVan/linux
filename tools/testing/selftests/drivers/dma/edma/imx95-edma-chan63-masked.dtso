@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Mark edma2 channel 63 unavailable without disabling its child node.
+ *
+ * Expected: fsl-edma probes successfully; channel 63 is not registered.
+ */
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target-path = "/soc/bus@42000000/dma-controller@42000000";
+		__overlay__ {
+			/* channels 0, 1 and 63 unavailable */
+			dma-channel-mask = <0x3 0x80000000>;
+		};
+	};
+};

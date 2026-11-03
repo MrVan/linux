@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Break the interrupt specifier of edma2 channel 63.
+ *
+ * dtc cannot delete a property inherited from the base tree in an overlay,
+ * so replace it with a truncated specifier.  of_irq_get() then fails.
+ *
+ * Expected: fsl-edma probe fails and asks for interrupts or
+ * dma-channel-mask.
+ */
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target-path = "/soc/bus@42000000/dma-controller@42000000/dma-channel@42208000";
+		__overlay__ {
+			interrupts = <0>;
+		};
+	};
+};

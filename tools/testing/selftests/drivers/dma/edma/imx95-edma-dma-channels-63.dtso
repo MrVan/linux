@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Reduce edma2 to 63 channels while the SoC DTS still has 64 child nodes.
+ *
+ * Expected: fsl-edma probes successfully; channel 63 is ignored because it
+ * is beyond dma-channels.
+ */
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target-path = "/soc/bus@42000000/dma-controller@42000000";
+		__overlay__ {
+			dma-channels = <63>;
+		};
+	};
+};

@@ -1,0 +1,92 @@
+i.MX95 fsl-edma child-node overlay tests
+========================================
+
+These overlays exercise the error paths introduced by per-channel DT child
+node support in fsl-edma.  They are intended for board testing only and are
+not part of the upstream edma series.
+
+Mainline does not provide /sys/kernel/config/device-tree.  The helper module
+of-overlay-test.ko applies a .dtbo with of_overlay_fdt_apply() and removes it
+on unload.  The .dtbo is loaded through request_firmware_direct().
+
+Requirements
+------------
+
+- CONFIG_OF_OVERLAY=y
+- CONFIG_FW_LOADER=y
+- A kernel build directory to build of-overlay-test.ko
+- scripts/dtc/dtc
+- No DMA client using the controller
+
+The overlays target edma2 channel 63 (dma-channel@42208000).  Channels 0 and 1
+are already marked unavailable by the base DTS.
+
+The script verifies that the running DT contains
+/sys/firmware/devicetree/base/soc/bus@42000000/dma-controller@42000000/dma-channel@42208000
+and refuses to run if the booted DTB was not built from the converted
+imx95.dtsi.  With dma-channel-mask = <0x3>, dma0chan0 and dma0chan1 must not
+be registered; if they are present, the running DTB does not match this
+series.
+
+Running
+-------
+
+  sudo ./test-edma-overlays.sh
+
+The script:
+
+1. compiles the .dtso files with dtc;
+2. installs the .dtbo files under /lib/firmware/edma-test;
+3. builds of-overlay-test.ko if needed;
+4. unbinds fsl-edma;
+5. loads the module to apply one overlay;
+6. rebinds fsl-edma and checks the result;
+7. unloads the module to remove the overlay and restores the base tree.
+
+Environment overrides:
+
+  DRV=fsl-edma
+  DEV=42000000.dma-controller
+  DTC=/path/to/scripts/dtc/dtc
+  KDIR=/lib/modules/$(uname -r)/build
+  MODULE=/path/to/of-overlay-test.ko
+  FW_DIR=/lib/firmware/edma-test
+
+Test matrix
+-----------
+
+  imx95-edma-chan63-disabled.dtso
+      Disable the channel 63 child node without masking it.
+      Expected: probe fails with
+      "has no dma-channel child node".
+
+  imx95-edma-chan63-disabled-masked.dtso
+      Disable the child node and set bit 63 in dma-channel-mask.
+      Expected: probe succeeds and channel 63 is absent.
+
+  imx95-edma-chan63-masked.dtso
+      Keep the child node but set bit 63 in dma-channel-mask.
+      Expected: probe succeeds and channel 63 is absent.
+
+  imx95-edma-chan63-no-irq.dtso
+      Break the interrupts specifier of the channel 63 child node.  A base
+      property cannot be deleted by an overlay, so it is replaced with a
+      truncated specifier.
+      Expected: probe fails with
+      "child node has no valid interrupt".
+
+  imx95-edma-chan63-unaligned.dtso
+      Move the channel 63 reg to an unaligned address.
+      Expected: probe fails with "invalid channel".
+
+  imx95-edma-chan63-outside.dtso
+      Move the channel 63 reg outside the controller range.
+      Expected: probe fails with "invalid channel".
+
+  imx95-edma-dma-channels-63.dtso
+      Reduce dma-channels to 63 while leaving all 64 child nodes.
+      Expected: probe succeeds and channel 63 is ignored.
+
+Note: the overlay target paths assume the i.MX95 node hierarchy
+/soc/bus@42000000/dma-controller@42000000.  Adjust them if the board uses a
+different base tree.

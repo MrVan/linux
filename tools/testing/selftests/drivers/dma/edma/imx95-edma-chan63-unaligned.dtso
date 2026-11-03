@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Move edma2 channel 63 to an unaligned register address.
+ *
+ * Expected: fsl-edma probe fails with "invalid channel".
+ */
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target-path = "/soc/bus@42000000/dma-controller@42000000/dma-channel@42208000";
+		__overlay__ {
+			reg = <0x4210c000 0x8000>;
+		};
+	};
+};
