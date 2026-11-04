@@ -1607,18 +1607,7 @@ static struct platform_driver i2c_pxa_driver = {
 	.id_table	= i2c_pxa_id_table,
 };
 
-static int __init i2c_adap_pxa_init(void)
-{
-	return platform_driver_register(&i2c_pxa_driver);
-}
-
-static void __exit i2c_adap_pxa_exit(void)
-{
-	platform_driver_unregister(&i2c_pxa_driver);
-}
-
 MODULE_DESCRIPTION("Intel PXA2XX I2C adapter");
 MODULE_LICENSE("GPL");
 
-subsys_initcall(i2c_adap_pxa_init);
-module_exit(i2c_adap_pxa_exit);
+subsys_platform_driver(i2c_pxa_driver);

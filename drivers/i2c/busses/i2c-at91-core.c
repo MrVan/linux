@@ -341,18 +341,7 @@ static struct platform_driver at91_twi_driver = {
 	},
 };
 
-static int __init at91_twi_init(void)
-{
-	return platform_driver_register(&at91_twi_driver);
-}
-
-static void __exit at91_twi_exit(void)
-{
-	platform_driver_unregister(&at91_twi_driver);
-}
-
-subsys_initcall(at91_twi_init);
-module_exit(at91_twi_exit);
+subsys_platform_driver(at91_twi_driver);
 
 MODULE_AUTHOR("Nikolaus Voss <n.voss@weinmann.de>");
 MODULE_DESCRIPTION("I2C (TWI) driver for Atmel AT91");

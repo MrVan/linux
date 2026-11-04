@@ -1188,18 +1188,7 @@ static struct platform_driver s3c24xx_i2c_driver = {
 		.of_match_table = of_match_ptr(s3c24xx_i2c_match),
 	},
 };
-
-static int __init i2c_adap_s3c_init(void)
-{
-	return platform_driver_register(&s3c24xx_i2c_driver);
-}
-subsys_initcall(i2c_adap_s3c_init);
-
-static void __exit i2c_adap_s3c_exit(void)
-{
-	platform_driver_unregister(&s3c24xx_i2c_driver);
-}
-module_exit(i2c_adap_s3c_exit);
+subsys_platform_driver(s3c24xx_i2c_driver);
 
 MODULE_DESCRIPTION("S3C24XX I2C Bus driver");
 MODULE_AUTHOR("Ben Dooks <ben@simtec.co.uk>");

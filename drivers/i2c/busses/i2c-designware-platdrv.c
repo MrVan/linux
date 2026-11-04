@@ -315,18 +315,7 @@ static struct platform_driver dw_i2c_driver = {
 	},
 	.id_table = dw_i2c_platform_ids,
 };
-
-static int __init dw_i2c_init_driver(void)
-{
-	return platform_driver_register(&dw_i2c_driver);
-}
-subsys_initcall(dw_i2c_init_driver);
-
-static void __exit dw_i2c_exit_driver(void)
-{
-	platform_driver_unregister(&dw_i2c_driver);
-}
-module_exit(dw_i2c_exit_driver);
+subsys_platform_driver(dw_i2c_driver);
 
 MODULE_AUTHOR("Baruch Siach <baruch@tkos.co.il>");
 MODULE_DESCRIPTION("Synopsys DesignWare I2C bus adapter");

@@ -888,18 +888,7 @@ static struct platform_driver mxs_i2c_driver = {
 	.probe = mxs_i2c_probe,
 	.remove = mxs_i2c_remove,
 };
-
-static int __init mxs_i2c_init(void)
-{
-	return platform_driver_register(&mxs_i2c_driver);
-}
-subsys_initcall(mxs_i2c_init);
-
-static void __exit mxs_i2c_exit(void)
-{
-	platform_driver_unregister(&mxs_i2c_driver);
-}
-module_exit(mxs_i2c_exit);
+subsys_platform_driver(mxs_i2c_driver);
 
 MODULE_AUTHOR("Marek Vasut <marex@denx.de>");
 MODULE_AUTHOR("Wolfram Sang <kernel@pengutronix.de>");

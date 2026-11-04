@@ -986,18 +986,7 @@ static struct platform_driver sh_mobile_i2c_driver = {
 	.probe		= sh_mobile_i2c_probe,
 	.remove		= sh_mobile_i2c_remove,
 };
-
-static int __init sh_mobile_i2c_adap_init(void)
-{
-	return platform_driver_register(&sh_mobile_i2c_driver);
-}
-subsys_initcall(sh_mobile_i2c_adap_init);
-
-static void __exit sh_mobile_i2c_adap_exit(void)
-{
-	platform_driver_unregister(&sh_mobile_i2c_driver);
-}
-module_exit(sh_mobile_i2c_adap_exit);
+subsys_platform_driver(sh_mobile_i2c_driver);
 
 MODULE_DESCRIPTION("SuperH Mobile I2C Bus Controller driver");
 MODULE_AUTHOR("Magnus Damm");

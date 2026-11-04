@@ -735,16 +735,6 @@ static struct platform_driver i2c_pnx_driver = {
 	.remove = i2c_pnx_remove,
 };
 
-static int __init i2c_adap_pnx_init(void)
-{
-	return platform_driver_register(&i2c_pnx_driver);
-}
-
-static void __exit i2c_adap_pnx_exit(void)
-{
-	platform_driver_unregister(&i2c_pnx_driver);
-}
-
 MODULE_AUTHOR("Vitaly Wool");
 MODULE_AUTHOR("Dennis Kovalev <source@mvista.com>");
 MODULE_DESCRIPTION("I2C driver for Philips IP3204-based I2C busses");
@@ -752,5 +742,4 @@ MODULE_LICENSE("GPL");
 MODULE_ALIAS("platform:pnx-i2c");
 
 /* We need to make sure I2C is initialized before USB */
-subsys_initcall(i2c_adap_pnx_init);
-module_exit(i2c_adap_pnx_exit);
+subsys_platform_driver(i2c_pnx_driver);

@@ -896,19 +896,7 @@ static struct platform_driver davinci_i2c_driver = {
 		.of_match_table = davinci_i2c_of_match,
 	},
 };
-
-/* I2C may be needed to bring up other drivers */
-static int __init davinci_i2c_init_driver(void)
-{
-	return platform_driver_register(&davinci_i2c_driver);
-}
-subsys_initcall(davinci_i2c_init_driver);
-
-static void __exit davinci_i2c_exit_driver(void)
-{
-	platform_driver_unregister(&davinci_i2c_driver);
-}
-module_exit(davinci_i2c_exit_driver);
+subsys_platform_driver(davinci_i2c_driver);
 
 MODULE_AUTHOR("Texas Instruments India");
 MODULE_DESCRIPTION("TI DaVinci I2C bus adapter");

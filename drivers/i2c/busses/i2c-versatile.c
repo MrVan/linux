@@ -116,18 +116,7 @@ static struct platform_driver i2c_versatile_driver = {
 	},
 };
 
-static int __init i2c_versatile_init(void)
-{
-	return platform_driver_register(&i2c_versatile_driver);
-}
-
-static void __exit i2c_versatile_exit(void)
-{
-	platform_driver_unregister(&i2c_versatile_driver);
-}
-
-subsys_initcall(i2c_versatile_init);
-module_exit(i2c_versatile_exit);
+subsys_platform_driver(i2c_versatile_driver);
 
 MODULE_DESCRIPTION("ARM Versatile I2C bus driver");
 MODULE_LICENSE("GPL");

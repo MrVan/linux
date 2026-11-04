@@ -2126,18 +2126,7 @@ static struct platform_driver i2c_imx_driver = {
 	},
 	.id_table = imx_i2c_devtype,
 };
-
-static int __init i2c_adap_imx_init(void)
-{
-	return platform_driver_register(&i2c_imx_driver);
-}
-subsys_initcall(i2c_adap_imx_init);
-
-static void __exit i2c_adap_imx_exit(void)
-{
-	platform_driver_unregister(&i2c_imx_driver);
-}
-module_exit(i2c_adap_imx_exit);
+subsys_platform_driver(i2c_imx_driver);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Darius Augulis");
