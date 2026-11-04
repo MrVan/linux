@@ -387,18 +387,7 @@ static struct platform_driver glink_rpm_driver = {
 		.of_match_table = glink_rpm_of_match,
 	},
 };
-
-static int __init glink_rpm_init(void)
-{
-	return platform_driver_register(&glink_rpm_driver);
-}
-subsys_initcall(glink_rpm_init);
-
-static void __exit glink_rpm_exit(void)
-{
-	platform_driver_unregister(&glink_rpm_driver);
-}
-module_exit(glink_rpm_exit);
+subsys_platform_driver(glink_rpm_driver);
 
 MODULE_AUTHOR("Bjorn Andersson <bjorn.andersson@linaro.org>");
 MODULE_DESCRIPTION("Qualcomm GLINK RPM driver");
