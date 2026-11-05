@@ -707,6 +707,7 @@ software_node_graph_get_remote_endpoint(const struct fwnode_handle *fwnode)
 	struct swnode *swnode = to_swnode(fwnode);
 	const struct software_node_ref_args *ref;
 	const struct property_entry *prop;
+	struct swnode *remote;
 
 	if (!swnode)
 		return NULL;
@@ -720,7 +721,11 @@ software_node_graph_get_remote_endpoint(const struct fwnode_handle *fwnode)
 	if (!ref->swnode)
 		return NULL;
 
-	return software_node_get(software_node_fwnode(ref->swnode));
+	remote = software_node_to_swnode_get(ref->swnode);
+	if (!remote)
+		return NULL;
+
+	return &remote->fwnode;
 }
 
 static struct fwnode_handle *
