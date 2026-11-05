@@ -627,6 +627,32 @@ static void pe_test_child_iteration(struct kunit *test)
 	software_node_unregister_node_group(group);
 }
 
+static void pe_test_swnode_reuse_after_unregister(struct kunit *test)
+{
+	/*
+	 * Use an unnamed node like dwc3-imx does. Named nodes would hit a
+	 * separate sysfs name collision while the old release is pending.
+	 */
+	static const struct software_node node = { };
+	int ret;
+
+	ret = software_node_register(&node);
+	KUNIT_ASSERT_EQ(test, ret, 0);
+
+	software_node_unregister(&node);
+
+	/*
+	 * The previous swnode may still be on the kset list with a zero
+	 * refcount if its release has been delayed, but registering the same
+	 * static node again must not find it.
+	 */
+	ret = software_node_register(&node);
+	KUNIT_EXPECT_EQ(test, ret, 0);
+
+	if (!ret)
+		software_node_unregister(&node);
+}
+
 static struct kunit_case property_entry_test_cases[] = {
 	KUNIT_CASE(pe_test_uints),
 	KUNIT_CASE(pe_test_uint_arrays),
@@ -636,6 +662,7 @@ static struct kunit_case property_entry_test_cases[] = {
 	KUNIT_CASE(pe_test_move_inline_str),
 	KUNIT_CASE(pe_test_reference),
 	KUNIT_CASE(pe_test_child_iteration),
+	KUNIT_CASE(pe_test_swnode_reuse_after_unregister),
 	{ }
 };
 
