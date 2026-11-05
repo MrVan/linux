@@ -38,6 +38,7 @@ struct swnode {
 
 	unsigned int allocated:1;
 	unsigned int managed:1;
+	unsigned int named:1;
 };
 
 static DEFINE_IDA(swnode_root_ids);
@@ -836,11 +837,20 @@ software_node_find_by_name(const struct software_node *parent, const char *name)
 	spin_lock(&swnode_kset->list_lock);
 
 	list_for_each_entry(k, &swnode_kset->list, entry) {
+		const struct software_node *candidate_parent;
+
 		swnode = kobj_to_swnode(k);
-		if (parent == swnode->node->parent && swnode->node->name &&
-		    !strcmp(name, swnode->node->name)) {
-			swnode_get(swnode);
-			break;
+		candidate_parent = swnode->parent ? swnode->parent->node : NULL;
+
+		/*
+		 * Do not dereference swnode->node here: for nodes registered by
+		 * the caller, the backing software_node may already be gone
+		 * while the swnode is waiting for its delayed release.
+		 */
+		if (parent == candidate_parent && swnode->named &&
+		    !strcmp(name, kobject_name(&swnode->kobj))) {
+			if (swnode_get_unless_zero(swnode))
+				break;
 		}
 		swnode = NULL;
 	}
@@ -923,6 +933,7 @@ swnode_register(const struct software_node *node, struct swnode *parent,
 	swnode->id = ret;
 	swnode->node = node;
 	swnode->parent = parent;
+	swnode->named = !!node->name;
 	swnode->kobj.kset = swnode_kset;
 	fwnode_init(&swnode->fwnode, &software_node_ops);
 
