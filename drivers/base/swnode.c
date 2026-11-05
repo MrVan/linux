@@ -546,6 +546,25 @@ software_node_get_named_child_node(const struct fwnode_handle *fwnode,
 	return NULL;
 }
 
+static struct fwnode_handle *
+software_node_get_reference_fwnode(const struct software_node_ref_args *ref)
+{
+	struct swnode *remote;
+
+	if (ref->swnode) {
+		remote = software_node_to_swnode_get(ref->swnode);
+		if (!remote)
+			return ERR_PTR(-ENOTCONN);
+
+		return &remote->fwnode;
+	}
+
+	if (ref->fwnode)
+		return fwnode_handle_get(ref->fwnode);
+
+	return ERR_PTR(-EINVAL);
+}
+
 static int
 software_node_get_reference_args(const struct fwnode_handle *fwnode,
 				 const char *propname, const char *nargs_prop,
@@ -592,37 +611,39 @@ software_node_get_reference_args(const struct fwnode_handle *fwnode,
 	 * relevant properties and bump the reference count.
 	 */
 
-	if (ref->swnode)
-		refnode = software_node_fwnode(ref->swnode);
-	else if (ref->fwnode)
-		refnode = ref->fwnode;
-	else
-		return -EINVAL;
-
-	if (!refnode)
-		return -ENOTCONN;
+	refnode = software_node_get_reference_fwnode(ref);
+	if (IS_ERR(refnode))
+		return PTR_ERR(refnode);
 
 	if (nargs_prop) {
 		error = fwnode_property_read_u32(refnode, nargs_prop, &nargs_prop_val);
 		if (error)
-			return error;
+			goto out_put;
 
 		nargs = nargs_prop_val;
 	}
 
-	if (nargs > NR_FWNODE_REFERENCE_ARGS)
-		return -EINVAL;
+	if (nargs > NR_FWNODE_REFERENCE_ARGS) {
+		error = -EINVAL;
+		goto out_put;
+	}
 
-	if (!args)
-		return 0;
+	if (!args) {
+		error = 0;
+		goto out_put;
+	}
 
-	args->fwnode = fwnode_handle_get(refnode);
+	args->fwnode = refnode;
 	args->nargs = nargs;
 
 	for (i = 0; i < nargs; i++)
 		args->args[i] = ref->args[i];
 
 	return 0;
+
+out_put:
+	fwnode_handle_put(refnode);
+	return error;
 }
 
 static struct fwnode_handle *
@@ -775,18 +796,15 @@ static int software_node_add_links(struct fwnode_handle *fwnode)
 		for (unsigned int i = 0; i < count; i++) {
 			ref = &ref_array[i];
 
-			if (ref->swnode)
-				refnode = software_node_fwnode(ref->swnode);
-			else if (ref->fwnode)
-				refnode = ref->fwnode;
-			else
+			refnode = software_node_get_reference_fwnode(ref);
+			if (IS_ERR(refnode))
 				continue;
 
 			/* Supplier not registered yet, or self-reference. */
-			if (!refnode || refnode == &swnode->fwnode)
-				continue;
+			if (refnode != &swnode->fwnode)
+				fwnode_link_add(&swnode->fwnode, refnode, 0);
 
-			fwnode_link_add(&swnode->fwnode, refnode, 0);
+			fwnode_handle_put(refnode);
 		}
 	}
 
