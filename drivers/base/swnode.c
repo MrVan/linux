@@ -592,37 +592,48 @@ software_node_get_reference_args(const struct fwnode_handle *fwnode,
 	 * relevant properties and bump the reference count.
 	 */
 
-	if (ref->swnode)
-		refnode = software_node_fwnode(ref->swnode);
-	else if (ref->fwnode)
-		refnode = ref->fwnode;
-	else
-		return -EINVAL;
+	if (ref->swnode) {
+		struct swnode *remote = software_node_to_swnode_get(ref->swnode);
 
-	if (!refnode)
-		return -ENOTCONN;
+		if (!remote)
+			return -ENOTCONN;
+
+		refnode = &remote->fwnode;
+	} else if (ref->fwnode) {
+		refnode = fwnode_handle_get(ref->fwnode);
+	} else {
+		return -EINVAL;
+	}
 
 	if (nargs_prop) {
 		error = fwnode_property_read_u32(refnode, nargs_prop, &nargs_prop_val);
 		if (error)
-			return error;
+			goto out_put;
 
 		nargs = nargs_prop_val;
 	}
 
-	if (nargs > NR_FWNODE_REFERENCE_ARGS)
-		return -EINVAL;
+	if (nargs > NR_FWNODE_REFERENCE_ARGS) {
+		error = -EINVAL;
+		goto out_put;
+	}
 
-	if (!args)
-		return 0;
+	if (!args) {
+		error = 0;
+		goto out_put;
+	}
 
-	args->fwnode = fwnode_handle_get(refnode);
+	args->fwnode = refnode;
 	args->nargs = nargs;
 
 	for (i = 0; i < nargs; i++)
 		args->args[i] = ref->args[i];
 
 	return 0;
+
+out_put:
+	fwnode_handle_put(refnode);
+	return error;
 }
 
 static struct fwnode_handle *
@@ -775,18 +786,28 @@ static int software_node_add_links(struct fwnode_handle *fwnode)
 		for (unsigned int i = 0; i < count; i++) {
 			ref = &ref_array[i];
 
-			if (ref->swnode)
-				refnode = software_node_fwnode(ref->swnode);
-			else if (ref->fwnode)
-				refnode = ref->fwnode;
-			else
+			if (ref->swnode) {
+				struct swnode *remote;
+
+				remote = software_node_to_swnode_get(ref->swnode);
+				if (!remote)
+					continue;
+
+				refnode = &remote->fwnode;
+			} else if (ref->fwnode) {
+				refnode = fwnode_handle_get(ref->fwnode);
+			} else {
 				continue;
+			}
 
 			/* Supplier not registered yet, or self-reference. */
-			if (!refnode || refnode == &swnode->fwnode)
+			if (refnode == &swnode->fwnode) {
+				fwnode_handle_put(refnode);
 				continue;
+			}
 
 			fwnode_link_add(&swnode->fwnode, refnode, 0);
+			fwnode_handle_put(refnode);
 		}
 	}
 
