@@ -75,8 +75,36 @@ static inline struct swnode *dev_to_swnode(struct device *dev)
 	return to_swnode(fwnode);
 }
 
+static struct swnode *swnode_get(struct swnode *swnode)
+{
+	kobject_get(&swnode->kobj);
+
+	return swnode;
+}
+
+static void swnode_put(struct swnode *swnode)
+{
+	kobject_put(&swnode->kobj);
+}
+
+static struct swnode *swnode_get_unless_zero(struct swnode *swnode)
+{
+	if (!kobject_get_unless_zero(&swnode->kobj))
+		return NULL;
+
+	return swnode;
+}
+
+/*
+ * Find the swnode registered for @node and return it with a new reference.
+ *
+ * A kobject remains on the kset list until its release callback runs, so an
+ * entry whose last reference has already been dropped can still be found
+ * here.  Use kobject_get_unless_zero() to skip such objects instead of
+ * resurrecting them.
+ */
 static struct swnode *
-software_node_to_swnode(const struct software_node *node)
+software_node_to_swnode_get(const struct software_node *node)
 {
 	struct swnode *swnode = NULL;
 	struct kobject *k;
@@ -87,13 +115,34 @@ software_node_to_swnode(const struct software_node *node)
 	spin_lock(&swnode_kset->list_lock);
 
 	list_for_each_entry(k, &swnode_kset->list, entry) {
-		swnode = kobj_to_swnode(k);
-		if (swnode->node == node)
-			break;
-		swnode = NULL;
+		struct swnode *candidate = kobj_to_swnode(k);
+
+		if (candidate->node != node)
+			continue;
+
+		if (!swnode_get_unless_zero(candidate))
+			continue;
+
+		swnode = candidate;
+		break;
 	}
 
 	spin_unlock(&swnode_kset->list_lock);
+
+	return swnode;
+}
+
+/*
+ * Borrowed-pointer variant of software_node_to_swnode_get().  The caller must
+ * guarantee the lifetime of @node by other means.
+ */
+static struct swnode *
+software_node_to_swnode(const struct software_node *node)
+{
+	struct swnode *swnode = software_node_to_swnode_get(node);
+
+	if (swnode)
+		swnode_put(swnode);
 
 	return swnode;
 }
@@ -373,18 +422,6 @@ EXPORT_SYMBOL_GPL(property_entries_free);
 
 /* -------------------------------------------------------------------------- */
 /* fwnode operations */
-
-static struct swnode *swnode_get(struct swnode *swnode)
-{
-	kobject_get(&swnode->kobj);
-
-	return swnode;
-}
-
-static void swnode_put(struct swnode *swnode)
-{
-	kobject_put(&swnode->kobj);
-}
 
 static struct fwnode_handle *software_node_get(struct fwnode_handle *fwnode)
 {
@@ -977,21 +1014,39 @@ void software_node_unregister_node_group(const struct software_node * const *nod
 }
 EXPORT_SYMBOL_GPL(software_node_unregister_node_group);
 
+static struct swnode *
+software_node_register_node(const struct software_node *node)
+{
+	struct swnode *parent, *swnode;
+	struct fwnode_handle *fwnode;
+
+	swnode = software_node_to_swnode_get(node);
+	if (swnode) {
+		swnode_put(swnode);
+		return ERR_PTR(-EEXIST);
+	}
+
+	parent = software_node_to_swnode_get(node->parent);
+	if (node->parent && !parent)
+		return ERR_PTR(-EINVAL);
+
+	fwnode = swnode_register(node, parent, 0);
+	if (parent)
+		swnode_put(parent);
+
+	if (IS_ERR(fwnode))
+		return ERR_CAST(fwnode);
+
+	return to_swnode(fwnode);
+}
+
 /**
  * software_node_register - Register static software node
  * @node: The software node to be registered
  */
 int software_node_register(const struct software_node *node)
 {
-	struct swnode *parent = software_node_to_swnode(node->parent);
-
-	if (software_node_to_swnode(node))
-		return -EEXIST;
-
-	if (node->parent && !parent)
-		return -EINVAL;
-
-	return PTR_ERR_OR_ZERO(swnode_register(node, parent, 0));
+	return PTR_ERR_OR_ZERO(software_node_register_node(node));
 }
 EXPORT_SYMBOL_GPL(software_node_register);
 
@@ -1061,21 +1116,16 @@ EXPORT_SYMBOL_GPL(fwnode_remove_software_node);
 int device_add_software_node(struct device *dev, const struct software_node *node)
 {
 	struct swnode *swnode;
-	int ret;
 
 	/* Only one software node per device. */
 	if (dev_to_swnode(dev))
 		return -EBUSY;
 
-	swnode = software_node_to_swnode(node);
-	if (swnode) {
-		swnode_get(swnode);
-	} else {
-		ret = software_node_register(node);
-		if (ret)
-			return ret;
-
-		swnode = software_node_to_swnode(node);
+	swnode = software_node_to_swnode_get(node);
+	if (!swnode) {
+		swnode = software_node_register_node(node);
+		if (IS_ERR(swnode))
+			return PTR_ERR(swnode);
 	}
 
 	set_secondary_fwnode(dev, &swnode->fwnode);
