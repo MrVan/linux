@@ -1264,8 +1264,15 @@ static int tegra241_vintf_init_vsid(struct iommufd_vdevice *vdev)
 	if (virt_sid > FIELD_MAX(VINTF_SID_MATCH_VIRT_SID))
 		return -EINVAL;
 
-	if (master->num_streams != 1 || arm_smmu_master_shares_sid(master))
+	if (master->num_streams != 1)
 		return -EOPNOTSUPP;
+
+	mutex_lock(&arm_smmu_asid_lock);
+	if (arm_smmu_master_shares_sid(master)) {
+		mutex_unlock(&arm_smmu_asid_lock);
+		return -EOPNOTSUPP;
+	}
+	mutex_unlock(&arm_smmu_asid_lock);
 
 	/* Find an empty pair of SID_REPLACE and SID_MATCH */
 	sidx = ida_alloc_max(&vintf->sids, vintf->cmdqv->num_sids_per_vintf - 1,

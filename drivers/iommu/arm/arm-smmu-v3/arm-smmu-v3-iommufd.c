@@ -168,12 +168,16 @@ static int arm_smmu_attach_dev_nested(struct iommu_domain *domain,
 
 	if (nested_domain->vsmmu->smmu != master->smmu)
 		return -EINVAL;
-	if (arm_smmu_master_shares_sid(master))
-		return -EOPNOTSUPP;
-	if (arm_smmu_ssids_in_use(&master->cd_table))
-		return -EBUSY;
 
 	mutex_lock(&arm_smmu_asid_lock);
+	if (arm_smmu_master_shares_sid(master)) {
+		mutex_unlock(&arm_smmu_asid_lock);
+		return -EOPNOTSUPP;
+	}
+	if (arm_smmu_ssids_in_use(&master->cd_table)) {
+		mutex_unlock(&arm_smmu_asid_lock);
+		return -EBUSY;
+	}
 	/*
 	 * The VM has to control the actual ATS state at the PCI device because
 	 * we forward the invalidations directly from the VM. If the VM doesn't
@@ -312,8 +316,15 @@ static int arm_vsmmu_vdevice_init(struct iommufd_vdevice *vdev)
 	 * arm_vsmmu_vsid_to_sid() maps a vSID to master->streams[0] alone, so
 	 * more streams would leave the rest stale and none reads out of bounds.
 	 */
-	if (master->num_streams != 1 || arm_smmu_master_shares_sid(master))
+	if (master->num_streams != 1)
 		return -EOPNOTSUPP;
+
+	mutex_lock(&arm_smmu_asid_lock);
+	if (arm_smmu_master_shares_sid(master)) {
+		mutex_unlock(&arm_smmu_asid_lock);
+		return -EOPNOTSUPP;
+	}
+	mutex_unlock(&arm_smmu_asid_lock);
 	return 0;
 }
 
@@ -547,8 +558,12 @@ size_t arm_smmu_get_viommu_size(struct device *dev,
 	struct arm_smmu_master *master = dev_iommu_priv_get(dev);
 	struct arm_smmu_device *smmu = master->smmu;
 
-	if (arm_smmu_master_shares_sid(master))
+	mutex_lock(&arm_smmu_asid_lock);
+	if (arm_smmu_master_shares_sid(master)) {
+		mutex_unlock(&arm_smmu_asid_lock);
 		return 0;
+	}
+	mutex_unlock(&arm_smmu_asid_lock);
 
 	if (!(smmu->features & ARM_SMMU_FEAT_NESTING))
 		return 0;
