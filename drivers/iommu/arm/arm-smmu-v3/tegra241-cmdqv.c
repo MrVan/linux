@@ -1264,7 +1264,7 @@ static int tegra241_vintf_init_vsid(struct iommufd_vdevice *vdev)
 	if (virt_sid > FIELD_MAX(VINTF_SID_MATCH_VIRT_SID))
 		return -EINVAL;
 
-	if (master->num_streams != 1)
+	if (master->num_streams != 1 || arm_smmu_master_shares_sid(master))
 		return -EOPNOTSUPP;
 
 	/* Find an empty pair of SID_REPLACE and SID_MATCH */
