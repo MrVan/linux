@@ -1563,7 +1563,7 @@ arm_smmu_get_cd_ptr(struct arm_smmu_ctx_desc_cfg *cd_table, u32 ssid)
 }
 
 struct arm_smmu_cd *arm_smmu_master_get_cd_ptr(struct arm_smmu_master *master,
-					u32 ssid)
+					       u32 ssid)
 {
 	return arm_smmu_get_cd_ptr(&master->cd_table, ssid);
 }
@@ -1692,7 +1692,8 @@ void arm_smmu_make_s1_cd(struct arm_smmu_cd *target,
 		CTXDESC_CD_0_V |
 		FIELD_PREP(CTXDESC_CD_0_TCR_IPS, tcr->ips) |
 		CTXDESC_CD_0_AA64 |
-		(master->stall_enabled ? CTXDESC_CD_0_S : 0) |
+		(master->stall_enabled ?
+			 CTXDESC_CD_0_S : 0) |
 		CTXDESC_CD_0_R |
 		CTXDESC_CD_0_A |
 		CTXDESC_CD_0_ASET |
@@ -2027,7 +2028,8 @@ void arm_smmu_make_s2_domain_ste(struct arm_smmu_ste *target,
 		STRTAB_STE_2_S2ENDI |
 #endif
 		STRTAB_STE_2_S2PTW |
-		(master->stall_enabled ? STRTAB_STE_2_S2S : 0) |
+		(master->stall_enabled ?
+			 STRTAB_STE_2_S2S : 0) |
 		STRTAB_STE_2_S2R);
 
 	target->data[3] = cpu_to_le64(pgtbl_cfg->arm_lpae_s2_cfg.vttbr &
@@ -3188,23 +3190,18 @@ arm_smmu_get_step_for_sid(struct arm_smmu_device *smmu, u32 sid)
 	}
 }
 
-void arm_smmu_install_ste_for_dev(struct arm_smmu_master *master,
-				  const struct arm_smmu_ste *target)
+static void
+arm_smmu_install_ste_for_dev_flags(struct arm_smmu_master *master,
+				   const struct arm_smmu_ste *target,
+				   bool skip_shared)
 {
 	int i, j;
+	bool written = false;
 	struct arm_smmu_device *smmu = master->smmu;
-
-	master->cd_table.in_ste =
-		FIELD_GET(STRTAB_STE_0_CFG, le64_to_cpu(target->data[0])) ==
-		STRTAB_STE_0_CFG_S1_TRANS;
-	master->ste_ats_enabled =
-		FIELD_GET(STRTAB_STE_1_EATS, le64_to_cpu(target->data[1])) ==
-		STRTAB_STE_1_EATS_TRANS;
 
 	for (i = 0; i < master->num_streams; ++i) {
 		u32 sid = master->streams[i]->id;
-		struct arm_smmu_ste *step =
-			arm_smmu_get_step_for_sid(smmu, sid);
+		struct arm_smmu_ste *step;
 
 		/* Bridged PCI devices may end up with duplicated IDs */
 		for (j = 0; j < i; j++)
@@ -3213,11 +3210,39 @@ void arm_smmu_install_ste_for_dev(struct arm_smmu_master *master,
 		if (j < i)
 			continue;
 
+		/*
+		 * A shared STE represents the group's domain, not a single
+		 * master. The release domain is attached to one device at a
+		 * time while the other sharers must keep translating; leave
+		 * the STE untouched until the last master is released.
+		 */
+		if (skip_shared && arm_smmu_master_shares_sid(master))
+			continue;
+
+		step = arm_smmu_get_step_for_sid(smmu, sid);
 		arm_smmu_write_ste(master, sid, step, target);
+		written = true;
+	}
+
+	if (written) {
+		master->cd_table.in_ste =
+			FIELD_GET(STRTAB_STE_0_CFG,
+				  le64_to_cpu(target->data[0])) ==
+			STRTAB_STE_0_CFG_S1_TRANS;
+		master->ste_ats_enabled =
+			FIELD_GET(STRTAB_STE_1_EATS,
+				  le64_to_cpu(target->data[1])) ==
+			STRTAB_STE_1_EATS_TRANS;
 	}
 }
 
-static bool arm_smmu_ats_supported(struct arm_smmu_master *master)
+void arm_smmu_install_ste_for_dev(struct arm_smmu_master *master,
+				  const struct arm_smmu_ste *target)
+{
+	arm_smmu_install_ste_for_dev_flags(master, target, false);
+}
+
+static bool arm_smmu_ats_capable(struct arm_smmu_master *master)
 {
 	struct device *dev = master->dev;
 	struct arm_smmu_device *smmu = master->smmu;
@@ -3230,6 +3255,18 @@ static bool arm_smmu_ats_supported(struct arm_smmu_master *master)
 		return false;
 
 	return dev_is_pci(dev) && pci_ats_supported(to_pci_dev(dev));
+}
+
+static bool arm_smmu_ats_supported(struct arm_smmu_master *master)
+{
+	return !arm_smmu_master_shares_sid(master) &&
+	       arm_smmu_ats_capable(master);
+}
+
+static bool arm_smmu_master_pasid_enabled(struct arm_smmu_master *master)
+{
+	return dev_is_pci(master->dev) &&
+	       to_pci_dev(master->dev)->pasid_enabled;
 }
 
 static void arm_smmu_enable_ats(struct arm_smmu_master *master)
@@ -3360,8 +3397,7 @@ static int arm_smmu_enable_iopf(struct arm_smmu_master *master,
 	if (!master->stall_enabled)
 		return 0;
 
-	/* We're not keeping track of SIDs in fault events */
-	if (master->num_streams != 1)
+	if (master->num_streams != 1 || arm_smmu_master_shares_sid(master))
 		return -EOPNOTSUPP;
 
 	if (master->iopf_refcount) {
@@ -3968,6 +4004,9 @@ static int arm_smmu_s1_set_dev_pasid(struct iommu_domain *domain,
 	if (smmu_domain->stage != ARM_SMMU_DOMAIN_S1)
 		return -EINVAL;
 
+	if (arm_smmu_master_shares_sid(master))
+		return -EOPNOTSUPP;
+
 	/*
 	 * We can read cd.asid outside the lock because arm_smmu_set_pasid()
 	 * will fix it
@@ -4164,11 +4203,11 @@ static int arm_smmu_blocking_set_dev_pasid(struct iommu_domain *new_domain,
 	return ret;
 }
 
-static void arm_smmu_attach_dev_ste(struct iommu_domain *domain,
-				    struct iommu_domain *old_domain,
-				    struct device *dev,
-				    struct arm_smmu_ste *ste,
-				    unsigned int s1dss)
+static int arm_smmu_attach_dev_ste(struct iommu_domain *domain,
+				   struct iommu_domain *old_domain,
+				   struct device *dev,
+				   struct arm_smmu_ste *ste,
+				   unsigned int s1dss, bool release)
 {
 	struct arm_smmu_master *master = dev_iommu_priv_get(dev);
 	struct arm_smmu_attach_state state = {
@@ -4178,6 +4217,7 @@ static void arm_smmu_attach_dev_ste(struct iommu_domain *domain,
 	};
 	bool ats_always_on = master->ats_always_on &&
 			     s1dss != STRTAB_STE_1_S1DSS_TERMINATE;
+	int ret;
 
 	/*
 	 * Do not allow any ASID to be changed while are working on the STE,
@@ -4198,13 +4238,17 @@ static void arm_smmu_attach_dev_ste(struct iommu_domain *domain,
 		 * and allows for ATS on the RID to work.
 		 */
 		state.cd_needs_ats = true;
-		arm_smmu_attach_prepare(&state, domain);
+		ret = arm_smmu_attach_prepare(&state, domain);
+		if (ret)
+			goto out_unlock;
 		arm_smmu_make_cdtable_ste(ste, master, &master->cd_table,
 					  state.ats_enabled, s1dss);
 	} else {
-		arm_smmu_attach_prepare(&state, domain);
+		ret = arm_smmu_attach_prepare(&state, domain);
+		if (ret)
+			goto out_unlock;
 	}
-	arm_smmu_install_ste_for_dev(master, ste);
+	arm_smmu_install_ste_for_dev_flags(master, ste, release);
 	arm_smmu_attach_commit(&state);
 	mutex_unlock(&arm_smmu_asid_lock);
 	arm_smmu_attach_release(&state);
@@ -4215,6 +4259,11 @@ static void arm_smmu_attach_dev_ste(struct iommu_domain *domain,
 	 * descriptor from arm_smmu_share_asid().
 	 */
 	arm_smmu_clear_cd(master, IOMMU_NO_PASID);
+	return 0;
+
+out_unlock:
+	mutex_unlock(&arm_smmu_asid_lock);
+	return ret;
 }
 
 static int arm_smmu_attach_dev_identity(struct iommu_domain *domain,
@@ -4226,9 +4275,8 @@ static int arm_smmu_attach_dev_identity(struct iommu_domain *domain,
 
 	arm_smmu_master_clear_vmaster(master);
 	arm_smmu_make_bypass_ste(master->smmu, &ste);
-	arm_smmu_attach_dev_ste(domain, old_domain, dev, &ste,
-				STRTAB_STE_1_S1DSS_BYPASS);
-	return 0;
+	return arm_smmu_attach_dev_ste(domain, old_domain, dev, &ste,
+				       STRTAB_STE_1_S1DSS_BYPASS, false);
 }
 
 static const struct iommu_domain_ops arm_smmu_identity_ops = {
@@ -4249,9 +4297,8 @@ static int arm_smmu_attach_dev_blocked(struct iommu_domain *domain,
 
 	arm_smmu_master_clear_vmaster(master);
 	arm_smmu_make_abort_ste(&ste);
-	arm_smmu_attach_dev_ste(domain, old_domain, dev, &ste,
-				STRTAB_STE_1_S1DSS_TERMINATE);
-	return 0;
+	return arm_smmu_attach_dev_ste(domain, old_domain, dev, &ste,
+				       STRTAB_STE_1_S1DSS_TERMINATE, false);
 }
 
 static const struct iommu_domain_ops arm_smmu_blocked_ops = {
@@ -4262,6 +4309,37 @@ static const struct iommu_domain_ops arm_smmu_blocked_ops = {
 static struct iommu_domain arm_smmu_blocked_domain = {
 	.type = IOMMU_DOMAIN_BLOCKED,
 	.ops = &arm_smmu_blocked_ops,
+};
+
+static int arm_smmu_attach_dev_release(struct iommu_domain *domain,
+				       struct device *dev,
+				       struct iommu_domain *old_domain)
+{
+	struct arm_smmu_ste ste;
+	struct arm_smmu_master *master = dev_iommu_priv_get(dev);
+	bool require_direct = dev->iommu && dev->iommu->require_direct;
+	unsigned int s1dss;
+
+	arm_smmu_master_clear_vmaster(master);
+	if (require_direct) {
+		arm_smmu_make_bypass_ste(master->smmu, &ste);
+		s1dss = STRTAB_STE_1_S1DSS_BYPASS;
+	} else {
+		arm_smmu_make_abort_ste(&ste);
+		s1dss = STRTAB_STE_1_S1DSS_TERMINATE;
+	}
+
+	return arm_smmu_attach_dev_ste(domain, old_domain, dev, &ste, s1dss,
+				       true);
+}
+
+static const struct iommu_domain_ops arm_smmu_release_ops = {
+	.attach_dev = arm_smmu_attach_dev_release,
+};
+
+static struct iommu_domain arm_smmu_release_domain = {
+	.type = IOMMU_DOMAIN_BLOCKED,
+	.ops = &arm_smmu_release_ops,
 };
 
 static struct iommu_domain *
@@ -4509,9 +4587,40 @@ static int arm_smmu_insert_master(struct arm_smmu_device *smmu,
 				break;
 			}
 
-			if (stream->master->stall_enabled) {
+			if (dev_is_pci(master->dev) !=
+			    dev_is_pci(stream->master->dev)) {
 				dev_warn(master->dev,
-					 "Shared StreamID 0x%x rejected: existing master has stall enabled\n",
+					 "Shared StreamID 0x%x across PCI and non-PCI masters unsupported\n",
+					 sid);
+				ret = -ENODEV;
+				break;
+			}
+
+			if (dev_is_pci(master->dev) &&
+			    pci_ats_required(to_pci_dev(master->dev))) {
+				dev_warn(master->dev,
+					 "Shared StreamID 0x%x rejected: incoming master requires ATS\n",
+					 sid);
+				ret = -EBUSY;
+				break;
+			}
+
+			if (stream->master->stall_enabled ||
+			    master->stall_enabled) {
+				dev_warn(master->dev,
+					 "Shared StreamID 0x%x rejected: stall enabled\n",
+					 sid);
+				ret = -EBUSY;
+				break;
+			}
+
+			if (stream->master->ats_always_on ||
+			    stream->master->ats_enabled ||
+			    arm_smmu_master_pasid_enabled(stream->master) ||
+			    arm_smmu_ssids_in_use(&stream->master->cd_table) ||
+			    stream->master->vmaster) {
+				dev_warn(master->dev,
+					 "Shared StreamID 0x%x rejected: existing master has PASID/ATS/vSMMU enabled\n",
 					 sid);
 				ret = -EBUSY;
 				break;
@@ -4584,7 +4693,7 @@ static int arm_smmu_master_prepare_ats(struct arm_smmu_master *master)
 		return 0;
 	pdev = to_pci_dev(master->dev);
 
-	if (!arm_smmu_ats_supported(master)) {
+	if (!arm_smmu_ats_capable(master)) {
 		if (pci_ats_required(pdev)) {
 			dev_err_once(master->dev, "SMMU doesn't support ATS\n");
 			return -EOPNOTSUPP;
@@ -4595,6 +4704,9 @@ static int arm_smmu_master_prepare_ats(struct arm_smmu_master *master)
 	ret = pci_prepare_ats(pdev, stu);
 	if (ret || !pci_ats_required(pdev))
 		return ret;
+
+	if (arm_smmu_master_shares_sid(master))
+		return -EOPNOTSUPP;
 
 	/*
 	 * S1DSS is required for ATS to be always on for identity domain cases.
@@ -4633,31 +4745,46 @@ static struct iommu_device *arm_smmu_probe_device(struct device *dev)
 	master->smmu = smmu;
 	dev_iommu_priv_set(dev, master);
 
-	ret = arm_smmu_insert_master(smmu, master);
-	if (ret)
-		goto err_free_master;
-
-	device_property_read_u32(dev, "pasid-num-bits", &master->ssid_bits);
-	master->ssid_bits = min(smmu->ssid_bits, master->ssid_bits);
-
 	/*
-	 * Note that PASID must be enabled before, and disabled after ATS:
-	 * PCI Express Base 4.0r1.0 - 10.5.1.3 ATS Control Register
-	 *
-	 *   Behavior is undefined if this bit is Set and the value of the PASID
-	 *   Enable, Execute Requested Enable, or Privileged Mode Requested bits
-	 *   are changed.
+	 * Resolve the stall policy before inserting the master. StreamID
+	 * sharing is rejected when either device wants stalling, and the
+	 * insert path needs to know the incoming master's policy.
 	 */
-	arm_smmu_enable_pasid(master);
-
-	if (!(smmu->features & ARM_SMMU_FEAT_2_LVL_CDTAB))
-		master->ssid_bits = min_t(u8, master->ssid_bits,
-					  CTXDESC_LINEAR_CDMAX);
-
 	if ((smmu->features & ARM_SMMU_FEAT_STALLS &&
 	     device_property_read_bool(dev, "dma-can-stall")) ||
 	    smmu->features & ARM_SMMU_FEAT_STALL_FORCE)
 		master->stall_enabled = true;
+
+	ret = arm_smmu_insert_master(smmu, master);
+	if (ret)
+		goto err_free_master;
+
+	if (arm_smmu_master_shares_sid(master)) {
+		/*
+		 * A shared StreamID cannot use PASID because all sharers must
+		 * point at the same, domain-owned CD table.
+		 */
+		master->ssid_bits = 0;
+	} else {
+		device_property_read_u32(dev, "pasid-num-bits",
+					 &master->ssid_bits);
+		master->ssid_bits = min(smmu->ssid_bits, master->ssid_bits);
+
+		/*
+		 * Note that PASID must be enabled before, and disabled after
+		 * ATS:
+		 * PCI Express Base 4.0r1.0 - 10.5.1.3 ATS Control Register
+		 *
+		 *   Behavior is undefined if this bit is Set and the value of
+		 *   the PASID Enable, Execute Requested Enable, or Privileged
+		 *   Mode Requested bits are changed.
+		 */
+		arm_smmu_enable_pasid(master);
+
+		if (!(smmu->features & ARM_SMMU_FEAT_2_LVL_CDTAB))
+			master->ssid_bits = min_t(u8, master->ssid_bits,
+						  CTXDESC_LINEAR_CDMAX);
+	}
 
 	ret = arm_smmu_master_prepare_ats(master);
 	if (ret)
@@ -4783,7 +4910,7 @@ static int arm_smmu_def_domain_type(struct device *dev)
 static const struct iommu_ops arm_smmu_ops = {
 	.identity_domain	= &arm_smmu_identity_domain,
 	.blocked_domain		= &arm_smmu_blocked_domain,
-	.release_domain		= &arm_smmu_blocked_domain,
+	.release_domain		= &arm_smmu_release_domain,
 	.capable		= arm_smmu_capable,
 	.hw_info		= arm_smmu_hw_info,
 	.domain_alloc_sva       = arm_smmu_sva_domain_alloc,

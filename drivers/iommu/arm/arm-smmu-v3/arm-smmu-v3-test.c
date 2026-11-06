@@ -215,6 +215,7 @@ static void arm_smmu_test_make_cdtable_ste(struct arm_smmu_ste *ste,
 		.stall_enabled = stall_enabled,
 	};
 
+	INIT_LIST_HEAD(&master.shared_masters_elm);
 	arm_smmu_make_cdtable_ste(ste, &master, &master.cd_table, ats_enabled,
 				  s1dss);
 	if (feat & ARM_SMMU_MASTER_TEST_NESTED) {
@@ -351,6 +352,7 @@ static void arm_smmu_test_make_s2_ste(struct arm_smmu_ste *ste,
 		.pgtbl_ops = &io_pgtable.ops,
 	};
 
+	INIT_LIST_HEAD(&master.shared_masters_elm);
 	io_pgtable.cfg.arm_lpae_s2_cfg.vttbr = 0xdaedbeefdeadbeefULL;
 	io_pgtable.cfg.arm_lpae_s2_cfg.vtcr.ps = 1;
 	io_pgtable.cfg.arm_lpae_s2_cfg.vtcr.tg = 2;
@@ -506,6 +508,7 @@ static void arm_smmu_test_make_s1_cd(struct arm_smmu_cd *cd, unsigned int asid)
 		},
 	};
 
+	INIT_LIST_HEAD(&master.shared_masters_elm);
 	io_pgtable.cfg.arm_lpae_s1_cfg.ttbr = 0xdaedbeefdeadbeefULL;
 	io_pgtable.cfg.arm_lpae_s1_cfg.tcr.ips = 1;
 	io_pgtable.cfg.arm_lpae_s1_cfg.tcr.tg = 2;
@@ -549,6 +552,7 @@ static void arm_smmu_test_make_sva_cd(struct arm_smmu_cd *cd, unsigned int asid)
 		.smmu = &smmu,
 	};
 
+	INIT_LIST_HEAD(&master.shared_masters_elm);
 	arm_smmu_make_sva_cd(cd, &master, &sva_mm, asid);
 }
 
@@ -559,6 +563,7 @@ static void arm_smmu_test_make_sva_release_cd(struct arm_smmu_cd *cd,
 		.smmu = &smmu,
 	};
 
+	INIT_LIST_HEAD(&master.shared_masters_elm);
 	arm_smmu_make_sva_cd(cd, &master, NULL, asid);
 }
 
