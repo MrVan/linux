@@ -4081,6 +4081,11 @@ int arm_smmu_set_pasid(struct arm_smmu_master *master,
 	}
 
 	mutex_lock(&arm_smmu_asid_lock);
+	if (arm_smmu_master_shares_sid(master)) {
+		mutex_unlock(&arm_smmu_asid_lock);
+		return -EOPNOTSUPP;
+	}
+
 	ret = arm_smmu_attach_prepare(&state, &smmu_domain->domain);
 	if (ret) {
 		mutex_unlock(&arm_smmu_asid_lock);
@@ -4563,6 +4568,11 @@ static int arm_smmu_insert_master(struct arm_smmu_device *smmu,
 	}
 	INIT_LIST_HEAD(&master->shared_masters_elm);
 
+	/*
+	 * Serialize sharing changes with attach/PASID/ATS updates, which
+	 * hold arm_smmu_asid_lock. Lock order is asid_lock -> streams_mutex.
+	 */
+	mutex_lock(&arm_smmu_asid_lock);
 	mutex_lock(&smmu->streams_mutex);
 	for (i = 0, n = 0; i < fwspec->num_ids; i++) {
 		struct arm_smmu_stream *stream;
@@ -4653,11 +4663,13 @@ static int arm_smmu_insert_master(struct arm_smmu_device *smmu,
 	if (ret) {
 		arm_smmu_free_master_streams(master);
 		mutex_unlock(&smmu->streams_mutex);
+		mutex_unlock(&arm_smmu_asid_lock);
 		kfree(master->streams);
 		kfree(master->build_invs);
 		return ret;
 	}
 	mutex_unlock(&smmu->streams_mutex);
+	mutex_unlock(&arm_smmu_asid_lock);
 
 	/* Put the ids into order for sorted to_merge/to_unref arrays */
 	sort(master->streams, master->num_streams,
@@ -4674,9 +4686,11 @@ static void arm_smmu_remove_master(struct arm_smmu_master *master)
 	if (!smmu || !master->streams)
 		return;
 
+	mutex_lock(&arm_smmu_asid_lock);
 	mutex_lock(&smmu->streams_mutex);
 	arm_smmu_free_master_streams(master);
 	mutex_unlock(&smmu->streams_mutex);
+	mutex_unlock(&arm_smmu_asid_lock);
 
 	kfree(master->streams);
 	kfree(master->build_invs);
