@@ -123,6 +123,8 @@ static const char * const event_class_str[] = {
 };
 
 static int arm_smmu_master_alloc_cd_tables(struct arm_smmu_master *master);
+static void arm_smmu_free_cd_tables(struct arm_smmu_device *smmu,
+				    struct arm_smmu_ctx_desc_cfg *cd_table);
 static bool arm_smmu_ats_supported(struct arm_smmu_master *master);
 
 static void parse_driver_options(struct arm_smmu_device *smmu)
@@ -1568,11 +1570,31 @@ struct arm_smmu_cd *arm_smmu_master_get_cd_ptr(struct arm_smmu_master *master,
 	return arm_smmu_get_cd_ptr(&master->cd_table, ssid);
 }
 
+static int arm_smmu_alloc_cd_ptr_l2(struct arm_smmu_master *master, u32 ssid)
+{
+	struct arm_smmu_ctx_desc_cfg *cd_table = &master->cd_table;
+	unsigned int idx = arm_smmu_cdtab_l1_idx(ssid);
+	struct arm_smmu_cdtab_l2 **l2ptr = &cd_table->l2.l2ptrs[idx];
+	dma_addr_t l2ptr_dma;
+
+	if (*l2ptr)
+		return 0;
+
+	*l2ptr = dma_alloc_coherent(master->smmu->dev, sizeof(**l2ptr),
+				    &l2ptr_dma, GFP_KERNEL);
+	if (!*l2ptr)
+		return -ENOMEM;
+
+	arm_smmu_write_cd_l1_desc(&cd_table->l2.l1tab[idx], l2ptr_dma);
+	/* An invalid L1CD can be cached */
+	arm_smmu_sync_cd(master, ssid, false);
+	return 0;
+}
+
 static struct arm_smmu_cd *arm_smmu_alloc_cd_ptr(struct arm_smmu_master *master,
 						 u32 ssid)
 {
 	struct arm_smmu_ctx_desc_cfg *cd_table = &master->cd_table;
-	struct arm_smmu_device *smmu = master->smmu;
 
 	might_sleep();
 	iommu_group_mutex_assert(master->dev);
@@ -1582,24 +1604,10 @@ static struct arm_smmu_cd *arm_smmu_alloc_cd_ptr(struct arm_smmu_master *master,
 			return NULL;
 	}
 
-	if (cd_table->s1fmt == STRTAB_STE_0_S1FMT_64K_L2) {
-		unsigned int idx = arm_smmu_cdtab_l1_idx(ssid);
-		struct arm_smmu_cdtab_l2 **l2ptr = &cd_table->l2.l2ptrs[idx];
+	if (cd_table->s1fmt == STRTAB_STE_0_S1FMT_64K_L2 &&
+	    arm_smmu_alloc_cd_ptr_l2(master, ssid))
+		return NULL;
 
-		if (!*l2ptr) {
-			dma_addr_t l2ptr_dma;
-
-			*l2ptr = dma_alloc_coherent(smmu->dev, sizeof(**l2ptr),
-						    &l2ptr_dma, GFP_KERNEL);
-			if (!*l2ptr)
-				return NULL;
-
-			arm_smmu_write_cd_l1_desc(&cd_table->l2.l1tab[idx],
-						  l2ptr_dma);
-			/* An invalid L1CD can be cached */
-			arm_smmu_sync_cd(master, ssid, false);
-		}
-	}
 	return arm_smmu_get_cd_ptr(cd_table, ssid);
 }
 
@@ -1831,9 +1839,25 @@ err_free_l2ptrs:
 
 static int arm_smmu_master_alloc_cd_tables(struct arm_smmu_master *master)
 {
-	return arm_smmu_alloc_cd_tables(master->smmu, &master->cd_table,
-					master->ssid_bits,
-					master->ats_always_on);
+	int ret;
+
+	ret = arm_smmu_alloc_cd_tables(master->smmu, &master->cd_table,
+				       master->ssid_bits,
+				       master->ats_always_on);
+	if (ret)
+		return ret;
+
+	if (master->cd_table.s1fmt == STRTAB_STE_0_S1FMT_64K_L2) {
+		ret = arm_smmu_alloc_cd_ptr_l2(master, IOMMU_NO_PASID);
+		if (ret) {
+			u8 in_ste = master->cd_table.in_ste;
+
+			arm_smmu_free_cd_tables(master->smmu, &master->cd_table);
+			memset(&master->cd_table, 0, sizeof(master->cd_table));
+			master->cd_table.in_ste = in_ste;
+		}
+	}
+	return ret;
 }
 
 static void arm_smmu_free_cd_tables(struct arm_smmu_device *smmu,
@@ -4112,9 +4136,9 @@ int arm_smmu_set_pasid(struct arm_smmu_master *master,
 		return -ENOMEM;
 
 	if (first) {
-		cd0ptr = arm_smmu_alloc_cd_ptr(master, IOMMU_NO_PASID);
-		if (!cd0ptr)
-			return -ENOMEM;
+		cd0ptr = arm_smmu_master_get_cd_ptr(master, IOMMU_NO_PASID);
+		if (WARN_ON(!cd0ptr))
+			return -ENXIO;
 	}
 
 	mutex_lock(&arm_smmu_asid_lock);
