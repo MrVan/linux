@@ -178,8 +178,8 @@ static void arm_smmu_mm_release(struct mmu_notifier *mn, struct mm_struct *mm)
 			continue;
 		arm_smmu_make_sva_cd(&target, master, NULL,
 				     smmu_domain->cd.asid);
-		arm_smmu_write_cd_entry(master, master_domain->ssid, cdptr,
-					&target);
+		arm_smmu_write_cd_entry_no_account(master, master_domain->ssid,
+						   cdptr, &target);
 	}
 	spin_unlock_irqrestore(&smmu_domain->devices_lock, flags);
 
