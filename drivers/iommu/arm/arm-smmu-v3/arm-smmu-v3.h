@@ -1096,8 +1096,8 @@ struct arm_smmu_domain {
 
 	/*
 	 * CD table shared by all non-PASID devices attached to this S1
-	 * domain. A master uses a private table only when it needs
-	 * substreams (PASID) or ATS-always-on/S1DSS.
+	 * domain. A master uses a private table when it needs substreams
+	 * (PASID), ATS-always-on/S1DSS, or the stall model.
 	 */
 	struct arm_smmu_ctx_desc_cfg	cd_table;
 
@@ -1212,6 +1212,9 @@ void arm_smmu_make_s1_cd(struct arm_smmu_cd *target,
 void arm_smmu_write_cd_entry(struct arm_smmu_master *master, int ssid,
 			     struct arm_smmu_cd *cdptr,
 			     const struct arm_smmu_cd *target);
+void arm_smmu_write_cd_entry_no_account(struct arm_smmu_master *master, int ssid,
+					struct arm_smmu_cd *cdptr,
+					const struct arm_smmu_cd *target);
 
 int arm_smmu_set_pasid(struct arm_smmu_master *master,
 		       struct arm_smmu_domain *smmu_domain, ioasid_t pasid,

@@ -1667,6 +1667,26 @@ void arm_smmu_write_cd_entry(struct arm_smmu_master *master, int ssid,
 	arm_smmu_write_entry(&cd_writer.writer, cdptr->data, target->data);
 }
 
+/*
+ * Quiesce the CD without changing the PASID accounting. mmu_notifier release
+ * writes a valid, faulting CD while the detach path owns the used_ssids
+ * transition, so it must not resurrect the PASID count.
+ */
+void arm_smmu_write_cd_entry_no_account(struct arm_smmu_master *master, int ssid,
+					struct arm_smmu_cd *cdptr,
+					const struct arm_smmu_cd *target)
+{
+	struct arm_smmu_cd_writer cd_writer = {
+		.writer = {
+			.ops = &arm_smmu_cd_writer_ops,
+			.master = master,
+		},
+		.ssid = ssid,
+	};
+
+	arm_smmu_write_entry(&cd_writer.writer, cdptr->data, target->data);
+}
+
 void arm_smmu_make_s1_cd(struct arm_smmu_cd *target,
 			 struct arm_smmu_master *master,
 			 struct arm_smmu_domain *smmu_domain)
@@ -1725,6 +1745,23 @@ void arm_smmu_clear_cd(struct arm_smmu_master *master, ioasid_t ssid)
 		return;
 	}
 	arm_smmu_write_cd_entry(master, ssid, cdptr, &target);
+}
+
+static void arm_smmu_clear_cd_no_account(struct arm_smmu_master *master,
+					 ioasid_t ssid)
+{
+	struct arm_smmu_cd target = {};
+	struct arm_smmu_cd *cdptr;
+
+	if (!arm_smmu_cdtab_allocated(&master->cd_table))
+		return;
+	cdptr = arm_smmu_master_get_cd_ptr(master, ssid);
+	if (!cdptr) {
+		/* Only ats_always_on allows a NULL CD on default substream */
+		WARN_ON(!master->ats_always_on || ssid);
+		return;
+	}
+	arm_smmu_write_cd_entry_no_account(master, ssid, cdptr, &target);
 }
 
 static int arm_smmu_alloc_cd_tables(struct arm_smmu_device *smmu,
@@ -4156,16 +4193,23 @@ static int arm_smmu_blocking_set_dev_pasid(struct iommu_domain *new_domain,
 	mutex_lock(&arm_smmu_asid_lock);
 	arm_smmu_attach_prepare_invs(&state, NULL);
 	/*
-	 * Unlink the PASID from the domain before invalidating its CD.
-	 * arm_smmu_mm_release() walks this list with only devices_lock held
-	 * and writes a valid, faulting CD; unlinking first prevents it from
-	 * resurrecting used_ssids after the last PASID is detached.
+	 * Invalidate the CD before unlinking the PASID from the domain.
+	 * arm_smmu_mm_release() walks this list with only devices_lock held:
+	 * if it sees the master_domain it writes a valid, faulting CD; if it
+	 * does not, the CD has already been invalidated here. Either way the
+	 * page tables can be freed after mm_release() returns.
 	 */
-	state.old_master_domain = arm_smmu_remove_master_domain(
-		master, &smmu_domain->domain, pasid);
 	arm_smmu_clear_cd(master, pasid);
 	if (master->ats_enabled)
 		arm_smmu_atc_inv_master(master, pasid);
+	state.old_master_domain = arm_smmu_remove_master_domain(
+		master, &smmu_domain->domain, pasid);
+	/*
+	 * mm_release() may have written a faulting CD in the window above.
+	 * Drop it without touching used_ssids so the CD is invalid again and
+	 * a later PASID attach accounts for the install correctly.
+	 */
+	arm_smmu_clear_cd_no_account(master, pasid);
 	arm_smmu_install_old_domain_invs(&state);
 	mutex_unlock(&arm_smmu_asid_lock);
 	arm_smmu_attach_release(&state);
@@ -4191,12 +4235,20 @@ static int arm_smmu_blocking_set_dev_pasid(struct iommu_domain *new_domain,
 				struct arm_smmu_domain *sid_smmu_domain =
 					to_smmu_domain(sid_domain);
 
+				if (master->stall_enabled)
+					return ret;
+
 				mutex_lock(&arm_smmu_asid_lock);
 				arm_smmu_make_cdtable_ste(
 					&ste, master, &sid_smmu_domain->cd_table,
 					master->ats_enabled,
 					STRTAB_STE_1_S1DSS_SSID0);
 				arm_smmu_install_ste_for_dev(master, &ste);
+				/*
+				 * The STE no longer references the private table;
+				 * drop its stale CD[0].
+				 */
+				arm_smmu_clear_cd(master, IOMMU_NO_PASID);
 				mutex_unlock(&arm_smmu_asid_lock);
 			} else if (sid_domain->type == IOMMU_DOMAIN_IDENTITY ||
 				   sid_domain->type == IOMMU_DOMAIN_BLOCKED) {
