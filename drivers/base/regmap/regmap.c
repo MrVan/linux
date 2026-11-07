@@ -1179,6 +1179,9 @@ struct regmap *__regmap_init(struct device *dev,
 	if (ret)
 		goto err_range;
 
+	if (bus && bus->init_limits)
+		bus->init_limits(map, config);
+
 	ret = regcache_init(map, config);
 	if (ret != 0)
 		goto err_range;
@@ -1206,8 +1209,6 @@ err_name:
 err_map:
 	kfree(map);
 err:
-	if (bus && bus->free_on_exit)
-		kfree(bus);
 	return ERR_PTR(ret);
 }
 EXPORT_SYMBOL_GPL(__regmap_init);
@@ -1513,8 +1514,6 @@ void regmap_exit(struct regmap *map)
 		mutex_destroy(&map->mutex);
 	kfree_const(map->name);
 	kfree(map->patch);
-	if (map->bus && map->bus->free_on_exit)
-		kfree(map->bus);
 	kfree(map);
 }
 EXPORT_SYMBOL_GPL(regmap_exit);
