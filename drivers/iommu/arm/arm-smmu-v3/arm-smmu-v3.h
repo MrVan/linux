@@ -879,7 +879,7 @@ struct arm_smmu_ctx_desc_cfg {
 	};
 	dma_addr_t			cdtab_dma;
 	unsigned int			used_ssids;
-	/* The STE is S1 translate; it may point at a domain or private table */
+	/* The STE walks this private CD table */
 	u8				in_ste;
 	u8				s1fmt;
 	/* log2 of the maximum number of CDs supported by this table */

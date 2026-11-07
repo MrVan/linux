@@ -1850,11 +1850,8 @@ static int arm_smmu_master_alloc_cd_tables(struct arm_smmu_master *master)
 	if (master->cd_table.s1fmt == STRTAB_STE_0_S1FMT_64K_L2) {
 		ret = arm_smmu_alloc_cd_ptr_l2(master, IOMMU_NO_PASID);
 		if (ret) {
-			u8 in_ste = master->cd_table.in_ste;
-
 			arm_smmu_free_cd_tables(master->smmu, &master->cd_table);
 			memset(&master->cd_table, 0, sizeof(master->cd_table));
-			master->cd_table.in_ste = in_ste;
 		}
 	}
 	return ret;
@@ -3286,10 +3283,14 @@ arm_smmu_install_ste_for_dev_flags(struct arm_smmu_master *master,
 	}
 
 	if (written) {
+		u64 ste = le64_to_cpu(target->data[0]);
+
 		master->cd_table.in_ste =
-			FIELD_GET(STRTAB_STE_0_CFG,
-				  le64_to_cpu(target->data[0])) ==
-			STRTAB_STE_0_CFG_S1_TRANS;
+			FIELD_GET(STRTAB_STE_0_CFG, ste) ==
+				STRTAB_STE_0_CFG_S1_TRANS &&
+			(ste & STRTAB_STE_0_S1CTXPTR_MASK) ==
+				(master->cd_table.cdtab_dma &
+				 STRTAB_STE_0_S1CTXPTR_MASK);
 		master->ste_ats_enabled =
 			FIELD_GET(STRTAB_STE_1_EATS,
 				  le64_to_cpu(target->data[1])) ==
@@ -4084,6 +4085,15 @@ static void arm_smmu_update_ste(struct arm_smmu_master *master,
 	unsigned int s1dss;
 	struct arm_smmu_ste ste;
 
+	/*
+	 * A repeat PASID attach leaves the STE on the private table with the
+	 * same S1DSS/EATS. arm_smmu_write_ste() would otherwise issue a
+	 * redundant CMD_PREFETCH_CFG for every stream.
+	 */
+	if (master->cd_table.in_ste &&
+	    master->ste_ats_enabled == ats_enabled)
+		return;
+
 	if (sid_domain->type == IOMMU_DOMAIN_IDENTITY)
 		s1dss = STRTAB_STE_1_S1DSS_BYPASS;
 	else if (sid_domain->type == IOMMU_DOMAIN_BLOCKED)
@@ -4125,7 +4135,8 @@ int arm_smmu_set_pasid(struct arm_smmu_master *master,
 	if (smmu_domain->smmu != master->smmu)
 		return -EINVAL;
 
-	if (!master->cd_table.in_ste &&
+	if (!((sid_domain->type & __IOMMU_DOMAIN_PAGING) &&
+	      to_smmu_domain(sid_domain)->stage == ARM_SMMU_DOMAIN_S1) &&
 	    sid_domain->type != IOMMU_DOMAIN_IDENTITY &&
 	    sid_domain->type != IOMMU_DOMAIN_BLOCKED)
 		return -EINVAL;
@@ -4185,15 +4196,7 @@ int arm_smmu_set_pasid(struct arm_smmu_master *master,
 
 	arm_smmu_write_cd_entry(master, pasid, cdptr, cd);
 
-	/*
-	 * A repeat PASID attach leaves the STE on the private table with the
-	 * same S1DSS/EATS. Only the first attach (or an ATS change) needs to
-	 * rewrite it; arm_smmu_write_ste() would otherwise issue a redundant
-	 * CMD_PREFETCH_CFG for every stream.
-	 */
-	if (first || !master->cd_table.in_ste ||
-	    master->ste_ats_enabled != state.ats_enabled)
-		arm_smmu_update_ste(master, sid_domain, state.ats_enabled);
+	arm_smmu_update_ste(master, sid_domain, state.ats_enabled);
 
 	arm_smmu_attach_commit(&state);
 	mutex_unlock(&arm_smmu_asid_lock);
