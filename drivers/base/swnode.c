@@ -35,6 +35,7 @@ struct swnode {
 	struct list_head entry;
 	struct list_head children;
 	struct swnode *parent;
+	spinlock_t children_lock;
 
 	unsigned int allocated:1;
 	unsigned int managed:1;
@@ -511,20 +512,42 @@ software_node_get_next_child(const struct fwnode_handle *fwnode,
 {
 	struct swnode *p = to_swnode(fwnode);
 	struct swnode *c = to_swnode(child);
+	struct swnode *next = NULL;
+	unsigned long flags;
 
-	if (!p || list_empty(&p->children) ||
-	    (c && list_is_last(&c->entry, &p->children))) {
+	if (!p) {
 		fwnode_handle_put(child);
 		return NULL;
 	}
 
-	if (c)
-		c = list_next_entry(c, entry);
-	else
-		c = list_first_entry(&p->children, struct swnode, entry);
+	spin_lock_irqsave(&p->children_lock, flags);
+
+	if (c && list_empty(&c->entry))
+		goto out;
+
+	if (!list_empty(&p->children) &&
+	    !(c && list_is_last(&c->entry, &p->children))) {
+		struct swnode *pos;
+
+		if (c)
+			pos = list_next_entry(c, entry);
+		else
+			pos = list_first_entry(&p->children, struct swnode, entry);
+
+		list_for_each_entry_from(pos, &p->children, entry) {
+			if (swnode_get_unless_zero(pos)) {
+				next = pos;
+				break;
+			}
+		}
+	}
+
+out:
+	spin_unlock_irqrestore(&p->children_lock, flags);
 
 	fwnode_handle_put(child);
-	return fwnode_handle_get(&c->fwnode);
+
+	return next ? &next->fwnode : NULL;
 }
 
 static struct fwnode_handle *
@@ -532,18 +555,25 @@ software_node_get_named_child_node(const struct fwnode_handle *fwnode,
 				   const char *childname)
 {
 	struct swnode *swnode = to_swnode(fwnode);
-	struct swnode *child;
+	struct swnode *child, *found = NULL;
+	unsigned long flags;
 
-	if (!swnode || list_empty(&swnode->children))
+	if (!swnode)
 		return NULL;
 
+	spin_lock_irqsave(&swnode->children_lock, flags);
+
 	list_for_each_entry(child, &swnode->children, entry) {
-		if (!strcmp(childname, kobject_name(&child->kobj))) {
-			swnode_get(child);
-			return &child->fwnode;
+		if (!strcmp(childname, kobject_name(&child->kobj)) &&
+		    swnode_get_unless_zero(child)) {
+			found = child;
+			break;
 		}
 	}
-	return NULL;
+
+	spin_unlock_irqrestore(&swnode->children_lock, flags);
+
+	return found ? &found->fwnode : NULL;
 }
 
 static struct fwnode_handle *
@@ -910,18 +940,31 @@ static void software_node_free(const struct software_node *node)
 	kfree(node);
 }
 
+static void swnode_unlink(struct swnode *swnode)
+{
+	struct swnode *parent = swnode->parent;
+	unsigned long flags;
+
+	if (!parent)
+		return;
+
+	spin_lock_irqsave(&parent->children_lock, flags);
+	list_del(&swnode->entry);
+	spin_unlock_irqrestore(&parent->children_lock, flags);
+
+	ida_free(&parent->child_ids, swnode->id);
+}
+
 static void software_node_release(struct kobject *kobj)
 {
 	struct swnode *swnode = kobj_to_swnode(kobj);
 
 	fwnode_links_purge(&swnode->fwnode);
 
-	if (swnode->parent) {
-		ida_free(&swnode->parent->child_ids, swnode->id);
-		list_del(&swnode->entry);
-	} else {
+	if (swnode->parent)
+		swnode_unlink(swnode);
+	else
 		ida_free(&swnode_root_ids, swnode->id);
-	}
 
 	if (swnode->allocated)
 		software_node_free(swnode->node);
@@ -963,6 +1006,7 @@ swnode_register(const struct software_node *node, struct swnode *parent,
 	ida_init(&swnode->child_ids);
 	INIT_LIST_HEAD(&swnode->entry);
 	INIT_LIST_HEAD(&swnode->children);
+	spin_lock_init(&swnode->children_lock);
 
 	if (node->name)
 		ret = kobject_init_and_add(&swnode->kobj, &software_node_type,
@@ -983,8 +1027,13 @@ swnode_register(const struct software_node *node, struct swnode *parent,
 	 */
 	swnode->allocated = allocated;
 
-	if (parent)
+	if (parent) {
+		unsigned long flags;
+
+		spin_lock_irqsave(&parent->children_lock, flags);
 		list_add_tail(&swnode->entry, &parent->children);
+		spin_unlock_irqrestore(&parent->children_lock, flags);
+	}
 
 	kobject_uevent(&swnode->kobj, KOBJ_ADD);
 	return &swnode->fwnode;
