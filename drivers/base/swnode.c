@@ -40,6 +40,7 @@ struct swnode {
 	unsigned int allocated:1;
 	unsigned int managed:1;
 	unsigned int named:1;
+	unsigned int unlinked:1;
 };
 
 static DEFINE_IDA(swnode_root_ids);
@@ -942,11 +943,12 @@ static void swnode_unlink(struct swnode *swnode)
 {
 	struct swnode *parent = swnode->parent;
 
-	if (!parent)
+	if (!parent || swnode->unlinked)
 		return;
 
 	spin_lock(&parent->children_lock);
-	list_del(&swnode->entry);
+	list_del_init(&swnode->entry);
+	swnode->unlinked = 1;
 	spin_unlock(&parent->children_lock);
 
 	ida_free(&parent->child_ids, swnode->id);
@@ -1178,6 +1180,8 @@ void fwnode_remove_software_node(struct fwnode_handle *fwnode)
 	if (!swnode)
 		return;
 
+	swnode_unlink(swnode);
+	kobject_del(&swnode->kobj);
 	swnode_put(swnode);
 }
 EXPORT_SYMBOL_GPL(fwnode_remove_software_node);
