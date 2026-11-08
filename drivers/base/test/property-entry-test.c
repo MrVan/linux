@@ -3,6 +3,7 @@
 //
 // Copyright 2019 Google LLC.
 
+#include <kunit/device.h>
 #include <kunit/test.h>
 
 #include <linux/of.h>
@@ -629,10 +630,7 @@ static void pe_test_child_iteration(struct kunit *test)
 
 static void pe_test_swnode_reuse_after_unregister(struct kunit *test)
 {
-	/*
-	 * Use an unnamed node like dwc3-imx does. Named nodes would hit a
-	 * separate sysfs name collision while the old release is pending.
-	 */
+	/* Use an unnamed node like dwc3-imx does. */
 	static const struct software_node node = { };
 	int ret;
 
@@ -653,6 +651,113 @@ static void pe_test_swnode_reuse_after_unregister(struct kunit *test)
 		software_node_unregister(&node);
 }
 
+static void pe_test_named_swnode_reuse_after_unregister(struct kunit *test)
+{
+	static const struct software_node node = {
+		.name = "pe-sw-named-reuse",
+	};
+	int ret;
+
+	ret = software_node_register(&node);
+	KUNIT_ASSERT_EQ(test, ret, 0);
+
+	software_node_unregister(&node);
+
+	/* The old sysfs directory must not block the new registration. */
+	ret = software_node_register(&node);
+	KUNIT_EXPECT_EQ(test, ret, 0);
+
+	if (!ret)
+		software_node_unregister(&node);
+}
+
+static void pe_test_swnode_child_reuse_after_unregister(struct kunit *test)
+{
+	static const struct software_node parent = {
+		.name = "pe-sw-child-parent",
+	};
+	static const struct software_node child = {
+		.parent = &parent,
+	};
+	int ret;
+
+	ret = software_node_register(&parent);
+	KUNIT_ASSERT_EQ(test, ret, 0);
+
+	ret = software_node_register(&child);
+	KUNIT_ASSERT_EQ(test, ret, 0);
+
+	software_node_unregister(&child);
+
+	/* The dying child must not corrupt or block the parent child list. */
+	ret = software_node_register(&child);
+	KUNIT_EXPECT_EQ(test, ret, 0);
+
+	if (!ret)
+		software_node_unregister(&child);
+
+	software_node_unregister(&parent);
+}
+
+static void pe_test_swnode_group_reuse_after_unregister(struct kunit *test)
+{
+	static const struct software_node parent = {
+		.name = "pe-sw-group-parent",
+	};
+	static const struct software_node child = {
+		.parent = &parent,
+	};
+	static const struct software_node *group[] = {
+		&parent, &child, NULL
+	};
+	int ret;
+
+	ret = software_node_register_node_group(group);
+	KUNIT_ASSERT_EQ(test, ret, 0);
+
+	software_node_unregister_node_group(group);
+
+	ret = software_node_register_node_group(group);
+	KUNIT_EXPECT_EQ(test, ret, 0);
+
+	if (!ret)
+		software_node_unregister_node_group(group);
+}
+
+static void pe_test_swnode_device_readd(struct kunit *test)
+{
+	static const struct software_node node = {
+		.name = "pe-sw-device-readd",
+	};
+	struct fwnode_handle *fwnode;
+	struct device *dev;
+	int ret;
+
+	dev = kunit_device_register(test, "pe-sw-device-readd");
+	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, dev);
+
+	ret = software_node_register(&node);
+	KUNIT_ASSERT_EQ(test, ret, 0);
+
+	ret = device_add_software_node(dev, &node);
+	KUNIT_ASSERT_EQ(test, ret, 0);
+	fwnode = dev_fwnode(dev);
+
+	device_remove_software_node(dev);
+
+	/* The node is still registered, it must not have been unlinked. */
+	ret = software_node_register(&node);
+	KUNIT_ASSERT_EQ(test, ret, -EEXIST);
+
+	/* Re-adding the device must reuse the same swnode instance. */
+	ret = device_add_software_node(dev, &node);
+	KUNIT_EXPECT_EQ(test, ret, 0);
+	KUNIT_EXPECT_PTR_EQ(test, dev_fwnode(dev), fwnode);
+
+	device_remove_software_node(dev);
+	software_node_unregister(&node);
+}
+
 static struct kunit_case property_entry_test_cases[] = {
 	KUNIT_CASE(pe_test_uints),
 	KUNIT_CASE(pe_test_uint_arrays),
@@ -663,6 +768,10 @@ static struct kunit_case property_entry_test_cases[] = {
 	KUNIT_CASE(pe_test_reference),
 	KUNIT_CASE(pe_test_child_iteration),
 	KUNIT_CASE(pe_test_swnode_reuse_after_unregister),
+	KUNIT_CASE(pe_test_named_swnode_reuse_after_unregister),
+	KUNIT_CASE(pe_test_swnode_child_reuse_after_unregister),
+	KUNIT_CASE(pe_test_swnode_group_reuse_after_unregister),
+	KUNIT_CASE(pe_test_swnode_device_readd),
 	{ }
 };
 
