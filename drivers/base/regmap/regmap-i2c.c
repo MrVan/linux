@@ -401,9 +401,14 @@ static const struct regmap_bus *regmap_get_i2c_bus(struct i2c_client *i2c,
 			max_read = quirks->max_read_len;
 
 		if (quirks->max_write_len &&
-		    (max_write == 0 || max_write > quirks->max_write_len))
-			max_write = quirks->max_write_len -
-				(config->reg_bits + config->pad_bits) / BITS_PER_BYTE;
+		    (max_write == 0 || max_write > quirks->max_write_len)) {
+			size_t reg_reserve_size;
+
+			reg_reserve_size = (config->reg_bits + config->pad_bits) /
+					   BITS_PER_BYTE;
+			if (quirks->max_write_len > reg_reserve_size)
+				max_write = quirks->max_write_len - reg_reserve_size;
+		}
 
 		if (max_read != bus->max_raw_read ||
 		    max_write != bus->max_raw_write) {
